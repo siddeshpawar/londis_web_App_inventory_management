@@ -1,23 +1,27 @@
 // frontend/src/firebaseConfig.js
+
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore } from 'firebase/firestore'; // Import getFirestore
 import { getAuth } from 'firebase/auth';
+import { getFunctions } from 'firebase/functions';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCVwde47xofIaRyJQr5QjeDgKCinQ7s8_U", // Replace with your actual API Key
-  authDomain: "londisinventoryapp.firebaseapp.com", // Replace with your actual Auth Domain
-  projectId: "londisinventoryapp", // Replace with your actual Project ID
-  storageBucket: "londisinventoryapp.firebasestorage.app", // Replace with your actual Storage Bucket
-  messagingSenderId: "990186016538", // Replace with your actual Sender ID
-  appId: "1:990186016538:web:e69f834cb120e62e5966a3" // Replace with your actual App ID
+  apiKey: "AIzaSyCVwde47xofIaRyJQr5QjeDgKCinQ7s8_U",
+  authDomain: "londisinventoryapp.firebaseapp.com",
+  projectId: "londisinventoryapp",
+  storageBucket: "londisinventoryapp.firebasestorage.app",
+  messagingSenderId: "990186016538",
+  appId: "1:990186016538:web:e69f834cb120e62e5966a3"
 };
 
-// Initialize Firebase
+// Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Get service instances
-export const db = getFirestore(app); // For Firestore database
-export const auth = getAuth(app); // For Firebase Authentication
+// Initialize and export Firebase service instances
+export const auth = getAuth(app);      // For Firebase Authentication
+export const db = getFirestore(app);   // For Firestore database
+export const functions = getFunctions(app); // For Cloud Functions
 
-// You can optionally export the app instance if needed elsewhere
-export default app;
+// You can optionally export the app instance if needed elsewhere,
+// but named exports for services are generally preferred.
+// export default app;
