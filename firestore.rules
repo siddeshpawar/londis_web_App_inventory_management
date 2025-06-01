@@ -1,16 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow read and write access only if the user is authenticated
-    match /products/{productId} {
-      allow read, create, update: if request.auth != null;
-      allow delete: if false; // Disallow direct deletion, use 'isRemoved' flag instead
+    // Allow any authenticated user to read products
+    match /products/{document=**} {
+      allow read: if request.auth != null;
+      // Allow authenticated users to write (add, update, delete) products.
+      // You might want to refine this further to only allow specific roles/users.
+      allow write: if request.auth != null;
     }
 
-    // Notifications collection - allow authenticated users to read (e.g., for in-app display)
-    // Could also allow authenticated users to delete notifications once they're handled.
-    match /notifications/{notificationId} {
-      allow read, create, update, delete: if request.auth != null;
+    // Rules for appSettings collection (specifically the 'messages' document)
+    match /appSettings/messages {
+      // Allow only the owner to write (create, update, delete) this document
+      allow write: if request.auth.token.email == 'siddeshpawar622.sp@gmail.com';
+      // Allow any authenticated user to read this document
+      allow read: if request.auth != null;
+    }
+
+    // Deny access to other collections by default if not explicitly allowed
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

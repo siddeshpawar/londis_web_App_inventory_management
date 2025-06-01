@@ -1,15 +1,20 @@
 // frontend/src/App.js
 import React, { useState, useEffect } from 'react';
-import { auth } from './firebaseConfig';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import { auth, db } from './firebaseConfig';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'; // Removed createUserWithEmailAndPassword
+import { doc, onSnapshot } from 'firebase/firestore';
 import AddProductForm from './AddProductForm';
 import ProductList from './ProductList';
+import MessageDisplay from './MessageDisplay';
+import SignUpModal from './SignUpModal'; // Import the SignUpModal component
 
 function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [user, setUser] = useState(null); // Firebase User object
+  const [user, setUser] = useState(null);
   const [authError, setAuthError] = useState('');
+  const [appMessage, setAppMessage] = useState('');
+  const [showSignUpModal, setShowSignUpModal] = useState(false); // New state to control modal visibility
 
   // Listen for authentication state changes
   useEffect(() => {
@@ -17,19 +22,26 @@ function App() {
       setUser(currentUser);
       setAuthError('');
     });
-    return () => unsubscribe(); // Cleanup subscription on unmount
+    return () => unsubscribe();
   }, []);
 
-  const handleSignUp = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-    try {
-      await createUserWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      setAuthError(error.message);
-      console.error("Error signing up:", error.message);
-    }
-  };
+  // Listen for app message changes from Firestore
+  useEffect(() => {
+    const messageDocRef = doc(db, 'appSettings', 'messages');
+    const unsubscribe = onSnapshot(messageDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setAppMessage(docSnap.data().currentMessage || '');
+      } else {
+        setAppMessage('');
+      }
+    }, (err) => {
+      console.error("Error fetching app message:", err);
+      // Optionally set an error state for the message if needed
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Removed handleSignUp from here, as it will be handled by the modal.
 
   const handleSignIn = async (e) => {
     e.preventDefault();
@@ -50,6 +62,9 @@ function App() {
       console.error("Error signing out:", error.message);
     }
   };
+
+  const ownerEmail = 'siddeshpawar622.sp@gmail.com';
+  const isOwner = user && user.email === ownerEmail;
 
   return (
     <div style={styles.appContainer}>
@@ -77,15 +92,25 @@ function App() {
               style={styles.authInput}
             />
             <button onClick={handleSignIn} style={styles.authButton}>Sign In</button>
-            <button onClick={handleSignUp} style={styles.authButton}>Sign Up</button>
+            {/* Modified: This button now opens the modal */}
+            <button onClick={() => setShowSignUpModal(true)} style={styles.authButton}>Sign Up</button>
             {authError && <p style={styles.authError}>{authError}</p>}
           </div>
         )}
       </header>
 
       <main style={styles.mainContent}>
+        {appMessage && (
+          <div style={styles.globalMessage}>
+            <p><strong>Announcement:</strong> {appMessage}</p>
+          </div>
+        )}
+
         {user ? (
           <>
+            {isOwner && (
+              <MessageDisplay currentMessage={appMessage} db={db} />
+            )}
             <AddProductForm />
             <ProductList />
           </>
@@ -93,6 +118,19 @@ function App() {
           <p style={styles.loginPrompt}>Please sign in to manage inventory.</p>
         )}
       </main>
+
+      {/* Conditionally render the SignUpModal */}
+      {showSignUpModal && (
+        <SignUpModal
+          onClose={() => setShowSignUpModal(false)}
+          onSignUpSuccess={() => {
+            setShowSignUpModal(false);
+            // Optionally clear email/password fields on main page after modal success
+            setEmail('');
+            setPassword('');
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -179,6 +217,16 @@ const styles = {
     borderRadius: '8px',
     boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
   },
+  globalMessage: {
+    backgroundColor: '#ffeeba',
+    color: '#856404',
+    padding: '10px 15px',
+    borderRadius: '5px',
+    marginBottom: '20px',
+    border: '1px solid #ffc107',
+    textAlign: 'center',
+    fontWeight: 'bold',
+  }
 };
 
 export default App;

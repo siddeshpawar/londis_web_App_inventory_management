@@ -1,6 +1,9 @@
 // functions/index.js
 
-const functions = require("firebase-functions");
+// Import the necessary modules for 2nd Gen callable functions and HttpsError
+const {onCall, HttpsError} = require("firebase-functions/v2/https"); //
+
+// The Firebase Admin SDK to access Firestore, Realtime Database, etc.
 const admin = require("firebase-admin");
 
 // Initialize Firebase Admin SDK
@@ -16,20 +19,21 @@ const auth = admin.auth();
  * It creates a user in Firebase Authentication, sends a verification email,
  * and creates a corresponding user document in Firestore.
  *
- * @param {Object} data - The data sent from the client.
- * @param {string} data.email - The user"s email address.
- * @param {string} data.password - The user"s password.
- * @param {string} data.mobileNumber - The user"s mobile number.
- * @param {Object} context - The context of the callable function call.
+ * @param {Object} request - The request object for 2nd Gen callable functions.
+ * @param {Object} request.data - The data sent from the client.
+ * @param {string} request.data.email - The user"s email address.
+ * @param {string} request.data.password - The user"s password.
+ * @param {string} request.data.mobileNumber - The user"s mobile number.
  * @returns {Object} An object containing the user"s UID and email on success.
- * @throws {functions.https.HttpsError} If there"s an error during the process.
+ * @throws {HttpsError} If there"s an error during the process.
  */
-exports.signUpUser = functions.https.onCall(async (data, context) => {
-  const {email, password, mobileNumber} = data;
+exports.signUpUser = onCall(async (request) => { //
+  // In 2nd Gen, `data` is accessed via `request.data`
+  const {email, password, mobileNumber} = request.data; //
 
   // 1. Input Validation
   if (!email || !password || !mobileNumber) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError( //
       "invalid-argument",
       "Email, password, and mobile number are required.",
     );
@@ -38,7 +42,7 @@ exports.signUpUser = functions.https.onCall(async (data, context) => {
   // Basic mobile number validation (can be enhanced)
   const mobileRegex = /^\+?[0-9]{7,15}$/;
   if (!mobileRegex.test(mobileNumber)) {
-    throw new functions.https.HttpsError(
+    throw new HttpsError( //
       "invalid-argument",
       "Please enter a valid mobile number (e.g., +447911123456 or 07911123456).",
     );
@@ -84,31 +88,31 @@ exports.signUpUser = functions.https.onCall(async (data, context) => {
       uid: userRecord.uid,
       email: userRecord.email,
       message: "Sign up successful! Please check your email for verification. " +
-               "Account pending admin approval.",
+                     "Account pending admin approval.",
     };
   } catch (error) {
     console.error("Error during signUpUser Cloud Function:", error);
 
     // Handle specific Firebase Auth errors and re-throw as HttpsError
     if (error.code === "auth/email-already-in-use") {
-      throw new functions.https.HttpsError(
+      throw new HttpsError( //
         "already-exists",
-        "This email is already in use. Please sign in or use a different email.", // Added trailing comma
+        "This email is already in use. Please sign in or use a different email.",
       );
     } else if (error.code === "auth/weak-password") {
-      throw new functions.https.HttpsError(
+      throw new HttpsError( //
         "weak-password",
         "Password is too weak. " +
-        "Please use at least 6 characters.", // Added trailing comma
+                "Please use at least 6 characters.",
       );
     } else if (error.code === "auth/invalid-email") {
-      throw new functions.https.HttpsError("invalid-argument", "The email address is not valid.");
+      throw new HttpsError("invalid-argument", "The email address is not valid."); //
     } else {
       // Generic error for unexpected issues
-      throw new functions.https.HttpsError(
+      throw new HttpsError( //
         "internal",
         "An unexpected error occurred during sign up. Please try again later.",
-        error.message, // Added trailing comma
+        error.message,
       );
     }
   }

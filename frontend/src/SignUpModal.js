@@ -1,240 +1,231 @@
-    // frontend/src/SignUpModal.js
+// frontend/src/App.js
+import React, { useState, useEffect } from 'react';
+import { auth, db } from './firebaseConfig';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'; // Removed createUserWithEmailAndPassword
+import { doc, onSnapshot } from 'firebase/firestore';
+import AddProductForm from './AddProductForm';
+import ProductList from './ProductList';
+import MessageDisplay from './MessageDisplay';
+import SignUpModal from './SignUpModal'; // Import the SignUpModal component
 
-    import React, { useState } from 'react';
-    import { auth, functions } from './firebaseConfig'; // Import 'functions' from firebaseConfig
-    import { httpsCallable } from 'firebase/functions'; // Import httpsCallable for calling Cloud Functions
-    // Note: createUserWithEmailAndPassword and sendEmailVerification are removed as the Cloud Function handles them.
-    // doc and setDoc from 'firebase/firestore' are also removed as the Cloud Function handles Firestore writes.
+function App() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [user, setUser] = useState(null);
+  const [authError, setAuthError] = useState('');
+  const [appMessage, setAppMessage] = useState('');
+  const [showSignUpModal, setShowSignUpModal] = useState(false); // New state to control modal visibility
 
-    function SignUpModal({ onClose, onSignUpSuccess }) {
-      const [email, setEmail] = useState('');
-      const [password, setPassword] = useState('');
-      const [mobileNumber, setMobileNumber] = useState('');
-      const [error, setError] = useState('');
-      const [loading, setLoading] = useState(false);
+  // Listen for authentication state changes
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthError('');
+    });
+    return () => unsubscribe();
+  }, []);
 
-      // Get a reference to the Cloud Function
-      const callSignUpFunction = httpsCallable(functions, 'signUpUser'); // 'signUpUser' is the name of your Cloud Function
+  // Listen for app message changes from Firestore
+  useEffect(() => {
+    const messageDocRef = doc(db, 'appSettings', 'messages');
+    const unsubscribe = onSnapshot(messageDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setAppMessage(docSnap.data().currentMessage || '');
+      } else {
+        setAppMessage('');
+      }
+    }, (err) => {
+      console.error("Error fetching app message:", err);
+    });
+    return () => unsubscribe();
+  }, []);
 
-      const handleSignUp = async (e) => {
-        e.preventDefault();
-        setError('');
-        setLoading(true);
+  // Removed handleSignUp from here, as it will be handled by the modal.
 
-        if (!email || !password || !mobileNumber) {
-          setError('Please fill in all fields (email, password, mobile number).');
-          setLoading(false);
-          return;
-        }
-
-        // Basic mobile number validation (can be enhanced)
-        const mobileRegex = /^\+?[0-9]{7,15}$/; // Simple regex for 7-15 digits, optional +
-        if (!mobileRegex.test(mobileNumber)) {
-          setError('Please enter a valid mobile number (e.g., +447911123456 or 07911123456).');
-          setLoading(false);
-          return;
-        }
-
-        try {
-          // Call the Cloud Function to handle user creation and Firestore document creation
-          const result = await callSignUpFunction({
-            email: email,
-            password: password,
-            mobileNumber: mobileNumber,
-          });
-
-          console.log('Cloud Function response:', result.data); // Log the response from the function
-
-          setLoading(false);
-          onSignUpSuccess(); // Notify parent component of success
-          // Updated message to inform user about both email verification AND admin approval
-          // IMPORTANT: Replaced alert() with a custom message box or modal in a real app.
-          // For this example, we'll use a simple alert as per previous instructions,
-          // but remember to replace it for production.
-          alert('Sign up successful! Please check your email to verify your account. Your account is pending admin approval and will be activated once verified.');
-
-        } catch (err) {
-          setLoading(false);
-          let errorMessage = 'Failed to sign up. Please try again.';
-
-          // Cloud Functions errors come with a 'code' and 'message' property
-          if (err.code === 'already-exists') {
-            errorMessage = 'This email is already in use. Please sign in or use a different email.';
-          } else if (err.code === 'weak-password') {
-            errorMessage = 'Password is too weak. Please use at least 6 characters.';
-          } else if (err.code === 'invalid-argument') {
-            errorMessage = err.message; // Use the specific message from the function
-          } else {
-            errorMessage = err.message; // Catch all other errors
-          }
-          setError(errorMessage);
-          console.error("Error signing up via Cloud Function:", err);
-        }
-      };
-
-      return (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent}>
-            <h2 style={styles.h2}>Sign Up for Londis Inventory</h2>
-            <form onSubmit={handleSignUp} style={styles.form}>
-              <div style={styles.formGroup}>
-                <label htmlFor="email" style={styles.label}>Email:</label>
-                <input
-                  type="email"
-                  id="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  style={styles.input}
-                  required
-                />
-              </div>
-              <div style={styles.formGroup}>
-                <label htmlFor="password" style={styles.label}>Password:</label>
-                <input
-                  type="password"
-                  id="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  style={styles.input}
-                  required
-                />
-              </div>
-              <div style={styles.formGroup}>
-                <label htmlFor="mobileNumber" style={styles.label}>Mobile Number:</label>
-                <input
-                  type="tel" // Use type="tel" for mobile numbers
-                  id="mobileNumber"
-                  value={mobileNumber}
-                  onChange={(e) => setMobileNumber(e.target.value)}
-                  style={styles.input}
-                  placeholder="+447911123456"
-                  required
-                />
-              </div>
-              {error && <p style={styles.errorText}>{error}</p>}
-              <div style={styles.buttonGroup}>
-                <button type="submit" style={styles.button} disabled={loading}>
-                  {loading ? 'Signing Up...' : 'Sign Up'}
-                </button>
-                <button type="button" onClick={onClose} style={styles.cancelButton} disabled={loading}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      );
+  const handleSignIn = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      setAuthError(error.message);
+      console.error("Error signing in:", error.message);
     }
+  };
 
-    const styles = {
-      modalOverlay: {
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        zIndex: 1000,
-      },
-      modalContent: {
-        backgroundColor: '#fff',
-        padding: '30px',
-        borderRadius: '10px',
-        boxShadow: '0 5px 15px rgba(0, 0, 0, 0.3)',
-        width: '90%',
-        maxWidth: '400px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px',
-      },
-      h2: {
-        textAlign: 'center',
-        color: '#333',
-        marginBottom: '10px',
-        fontSize: '1.8em',
-      },
-      form: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '15px',
-      },
-      formGroup: {
-        display: 'flex',
-        flexDirection: 'column',
-      },
-      label: {
-        marginBottom: '8px',
-        fontWeight: 'bold',
-        color: '#555',
-        fontSize: '0.95em',
-      },
-      input: {
-        padding: '12px',
-        border: '1px solid #ddd',
-        borderRadius: '6px',
-        fontSize: '1em',
-        width: '100%',
-        boxSizing: 'border-box', // Include padding in element's total width and height
-      },
-      buttonGroup: {
-        display: 'flex',
-        gap: '15px',
-        marginTop: '20px',
-        justifyContent: 'center',
-      },
-      button: {
-        padding: '12px 25px',
-        backgroundColor: '#28a745',
-        color: 'white',
-        border: 'none',
-        borderRadius: '6px',
-        fontSize: '1.1em',
-        cursor: 'pointer',
-        transition: 'background-color 0.3s ease, transform 0.2s ease',
-        boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
-        flexGrow: 1,
-      },
-      buttonHover: {
-        backgroundColor: '#218838',
-        transform: 'translateY(-2px)',
-      },
-      cancelButton: {
-        padding: '12px 25px',
-        backgroundColor: '#6c757d',
-        color: 'white',
-        border: 'none',
-        borderRadius: '6px',
-        fontSize: '1.1em',
-        cursor: 'pointer',
-        transition: 'background-color 0.3s ease, transform 0.2s ease',
-        boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
-        flexGrow: 1,
-      },
-      cancelButtonHover: {
-        backgroundColor: '#5a6268',
-        transform: 'translateY(-2px)',
-      },
-      errorText: {
-        color: '#dc3545',
-        backgroundColor: '#ffe3e6',
-        padding: '10px',
-        borderRadius: '5px',
-        textAlign: 'center',
-        fontSize: '0.9em',
-        border: '1px solid #dc3545',
-      },
-    };
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      setAuthError(error.message);
+      console.error("Error signing out:", error.message);
+    }
+  };
 
-    // Add hover effects dynamically
-    Object.assign(styles.button, {
-      ':hover': styles.buttonHover,
-    });
-    Object.assign(styles.cancelButton, {
-      ':hover': styles.cancelButtonHover,
-    });
+  const ownerEmail = 'siddeshpawar622.sp@gmail.com';
+  const isOwner = user && user.email === ownerEmail;
 
-    export default SignUpModal;
-    
+  return (
+    <div style={styles.appContainer}>
+      <header style={styles.header}>
+        <h1 style={styles.h1}>Londis Inventory Management</h1>
+        {user ? (
+          <div style={styles.authStatus}>
+            <p>Logged in as: <strong>{user.email}</strong></p>
+            <button onClick={handleSignOut} style={styles.logoutButton}>Logout</button>
+          </div>
+        ) : (
+          <div style={styles.authForm}>
+            <input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={styles.authInput}
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              style={styles.authInput}
+            />
+            <button onClick={handleSignIn} style={styles.authButton}>Sign In</button>
+            {/* Modified: This button now opens the modal */}
+            <button onClick={() => setShowSignUpModal(true)} style={styles.authButton}>Sign Up</button>
+            {authError && <p style={styles.authError}>{authError}</p>}
+          </div>
+        )}
+      </header>
+
+      <main style={styles.mainContent}>
+        {appMessage && (
+          <div style={styles.globalMessage}>
+            <p><strong>Announcement:</strong> {appMessage}</p>
+          </div>
+        )}
+
+        {user ? (
+          <>
+            {isOwner && (
+              <MessageDisplay currentMessage={appMessage} db={db} />
+            )}
+            <AddProductForm />
+            <ProductList />
+          </>
+        ) : (
+          <p style={styles.loginPrompt}>Please sign in to manage inventory.</p>
+        )}
+      </main>
+
+      {/* Conditionally render the SignUpModal */}
+      {showSignUpModal && (
+        <SignUpModal
+          onClose={() => setShowSignUpModal(false)}
+          onSignUpSuccess={() => {
+            setShowSignUpModal(false);
+            // Optionally clear email/password fields on main page after modal success
+            setEmail('');
+            setPassword('');
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Basic Inline Styles (rest of the styles are the same)
+const styles = {
+  appContainer: {
+    fontFamily: 'Arial, sans-serif',
+    backgroundColor: '#f4f7f6',
+    minHeight: '100vh',
+    padding: '20px',
+  },
+  header: {
+    backgroundColor: '#282c34',
+    padding: '20px',
+    color: 'white',
+    textAlign: 'center',
+    borderRadius: '8px',
+    marginBottom: '30px',
+  },
+  h1: {
+    margin: '0 0 15px 0',
+  },
+  authStatus: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '15px',
+  },
+  authForm: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: '10px',
+    flexWrap: 'wrap',
+  },
+  authInput: {
+    padding: '8px',
+    border: '1px solid #ccc',
+    borderRadius: '4px',
+    fontSize: '1em',
+  },
+  authButton: {
+    padding: '8px 15px',
+    backgroundColor: '#61dafb',
+    color: '#282c34',
+    border: 'none',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    fontSize: '1em',
+    transition: 'background-color 0.3s ease',
+  },
+  authButtonHover: {
+    backgroundColor: '#a2edff',
+  },
+  logoutButton: {
+    padding: '8px 15px',
+    backgroundColor: '#dc3545',
+    color: 'white',
+    border: 'none',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    fontSize: '1em',
+    transition: 'background-color 0.3s ease',
+  },
+  logoutButtonHover: {
+    backgroundColor: '#c82333',
+  },
+  authError: {
+    color: '#ffc107',
+    marginTop: '10px',
+    width: '100%',
+    textAlign: 'center',
+  },
+  mainContent: {
+    padding: '20px 0',
+  },
+  loginPrompt: {
+    textAlign: 'center',
+    fontSize: '1.2em',
+    color: '#666',
+    padding: '50px',
+    backgroundColor: '#fff',
+    borderRadius: '8px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+  },
+  globalMessage: {
+    backgroundColor: '#ffeeba',
+    color: '#856404',
+    padding: '10px 15px',
+    borderRadius: '5px',
+    marginBottom: '20px',
+    border: '1px solid #ffc107',
+    textAlign: 'center',
+    fontWeight: 'bold',
+  }
+};
+
+export default App;
