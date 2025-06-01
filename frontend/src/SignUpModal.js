@@ -1,179 +1,124 @@
-// frontend/src/App.js
-import React, { useState, useEffect } from 'react';
+// frontend/src/SignUpModal.js
+import React, { useState } from 'react';
 import { auth, db } from './firebaseConfig';
-import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'; // Removed createUserWithEmailAndPassword
-import { doc, onSnapshot } from 'firebase/firestore';
-import AddProductForm from './AddProductForm';
-import ProductList from './ProductList';
-import MessageDisplay from './MessageDisplay';
-import SignUpModal from './SignUpModal'; // Import the SignUpModal component
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
 
-function App() {
+function SignUpModal({ onClose, onSignUpSuccess }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [user, setUser] = useState(null);
-  const [authError, setAuthError] = useState('');
-  const [appMessage, setAppMessage] = useState('');
-  const [showSignUpModal, setShowSignUpModal] = useState(false); // New state to control modal visibility
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  // Listen for authentication state changes
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setAuthError('');
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Listen for app message changes from Firestore
-  useEffect(() => {
-    const messageDocRef = doc(db, 'appSettings', 'messages');
-    const unsubscribe = onSnapshot(messageDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setAppMessage(docSnap.data().currentMessage || '');
-      } else {
-        setAppMessage('');
-      }
-    }, (err) => {
-      console.error("Error fetching app message:", err);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Removed handleSignUp from here, as it will be handled by the modal.
-
-  const handleSignIn = async (e) => {
+  const handleSignUp = async (e) => {
     e.preventDefault();
-    setAuthError('');
+    setError('');
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      setAuthError(error.message);
-      console.error("Error signing in:", error.message);
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // Store user information in Firestore
+      await setDoc(doc(db, "users", user.uid), {
+        email: user.email,
+        createdAt: new Date(),
+        // Add any other default fields you need, e.g., role: 'user'
+      });
+
+      onSignUpSuccess(); // Call success callback from parent (App.js)
+    } catch (err) {
+      setError(err.message);
+      console.error("Error signing up:", err.message);
+    } finally {
+      setLoading(false);
     }
   };
-
-  const handleSignOut = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      setAuthError(error.message);
-      console.error("Error signing out:", error.message);
-    }
-  };
-
-  const ownerEmail = 'siddeshpawar622.sp@gmail.com';
-  const isOwner = user && user.email === ownerEmail;
 
   return (
-    <div style={styles.appContainer}>
-      <header style={styles.header}>
-        <h1 style={styles.h1}>Londis Inventory Management</h1>
-        {user ? (
-          <div style={styles.authStatus}>
-            <p>Logged in as: <strong>{user.email}</strong></p>
-            <button onClick={handleSignOut} style={styles.logoutButton}>Logout</button>
-          </div>
-        ) : (
-          <div style={styles.authForm}>
-            <input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              style={styles.authInput}
-            />
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              style={styles.authInput}
-            />
-            <button onClick={handleSignIn} style={styles.authButton}>Sign In</button>
-            {/* Modified: This button now opens the modal */}
-            <button onClick={() => setShowSignUpModal(true)} style={styles.authButton}>Sign Up</button>
-            {authError && <p style={styles.authError}>{authError}</p>}
-          </div>
-        )}
-      </header>
-
-      <main style={styles.mainContent}>
-        {appMessage && (
-          <div style={styles.globalMessage}>
-            <p><strong>Announcement:</strong> {appMessage}</p>
-          </div>
-        )}
-
-        {user ? (
-          <>
-            {isOwner && (
-              <MessageDisplay currentMessage={appMessage} db={db} />
-            )}
-            <AddProductForm />
-            <ProductList />
-          </>
-        ) : (
-          <p style={styles.loginPrompt}>Please sign in to manage inventory.</p>
-        )}
-      </main>
-
-      {/* Conditionally render the SignUpModal */}
-      {showSignUpModal && (
-        <SignUpModal
-          onClose={() => setShowSignUpModal(false)}
-          onSignUpSuccess={() => {
-            setShowSignUpModal(false);
-            // Optionally clear email/password fields on main page after modal success
-            setEmail('');
-            setPassword('');
-          }}
-        />
-      )}
+    <div style={styles.modalOverlay}>
+      <div style={styles.modalContent}>
+        <h2>Sign Up</h2>
+        <form onSubmit={handleSignUp} style={styles.form}>
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={styles.input}
+            required
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={styles.input}
+            required
+          />
+          <input
+            type="password"
+            placeholder="Confirm Password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            style={styles.input}
+            required
+          />
+          {error && <p style={styles.errorText}>{error}</p>}
+          <button type="submit" style={styles.button} disabled={loading}>
+            {loading ? 'Signing Up...' : 'Sign Up'}
+          </button>
+          <button type="button" onClick={onClose} style={{ ...styles.button, ...styles.cancelButton }}>
+            Cancel
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
 
-// Basic Inline Styles (rest of the styles are the same)
 const styles = {
-  appContainer: {
-    fontFamily: 'Arial, sans-serif',
-    backgroundColor: '#f4f7f6',
-    minHeight: '100vh',
-    padding: '20px',
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
   },
-  header: {
-    backgroundColor: '#282c34',
-    padding: '20px',
-    color: 'white',
+  modalContent: {
+    backgroundColor: 'white',
+    padding: '30px',
+    borderRadius: '10px',
+    boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)',
+    width: '90%',
+    maxWidth: '400px',
     textAlign: 'center',
-    borderRadius: '8px',
-    marginBottom: '30px',
   },
-  h1: {
-    margin: '0 0 15px 0',
-  },
-  authStatus: {
+  form: {
     display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: 'column',
     gap: '15px',
+    marginTop: '20px',
   },
-  authForm: {
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: '10px',
-    flexWrap: 'wrap',
-  },
-  authInput: {
-    padding: '8px',
-    border: '1px solid #ccc',
-    borderRadius: '4px',
+  input: {
+    padding: '12px',
+    border: '1px solid #ddd',
+    borderRadius: '5px',
     fontSize: '1em',
   },
-  authButton: {
-    padding: '8px 15px',
+  button: {
+    padding: '12px 20px',
     backgroundColor: '#61dafb',
     color: '#282c34',
     border: 'none',
@@ -182,50 +127,21 @@ const styles = {
     fontSize: '1em',
     transition: 'background-color 0.3s ease',
   },
-  authButtonHover: {
+  buttonHover: {
     backgroundColor: '#a2edff',
   },
-  logoutButton: {
-    padding: '8px 15px',
-    backgroundColor: '#dc3545',
+  cancelButton: {
+    backgroundColor: '#6c757d',
     color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    fontSize: '1em',
-    transition: 'background-color 0.3s ease',
-  },
-  logoutButtonHover: {
-    backgroundColor: '#c82333',
-  },
-  authError: {
-    color: '#ffc107',
     marginTop: '10px',
-    width: '100%',
-    textAlign: 'center',
   },
-  mainContent: {
-    padding: '20px 0',
+  cancelButtonHover: {
+    backgroundColor: '#5a6268',
   },
-  loginPrompt: {
-    textAlign: 'center',
-    fontSize: '1.2em',
-    color: '#666',
-    padding: '50px',
-    backgroundColor: '#fff',
-    borderRadius: '8px',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+  errorText: {
+    color: '#dc3545',
+    marginBottom: '10px',
   },
-  globalMessage: {
-    backgroundColor: '#ffeeba',
-    color: '#856404',
-    padding: '10px 15px',
-    borderRadius: '5px',
-    marginBottom: '20px',
-    border: '1px solid #ffc107',
-    textAlign: 'center',
-    fontWeight: 'bold',
-  }
 };
 
-export default App;
+export default SignUpModal;
