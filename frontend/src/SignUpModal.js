@@ -1,13 +1,45 @@
 // frontend/src/SignUpModal.js
 import React, { useState } from 'react';
-import { auth, db } from './firebaseConfig';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
+import { getFirestore, doc, setDoc } from 'firebase/firestore';
+import { initializeApp } from 'firebase/app';
+
+// --- Firebase Initialization (using your provided config) ---
+// This is duplicated from App.js but necessary for SignUpModal to be self-contained.
+const firebaseConfig = {
+  apiKey: "AIzaSyCVwde47xofIaRyJQr5QjeDgKCinQ7s8_U",
+  authDomain: "londisinventoryapp.firebaseapp.com",
+  projectId: "londisinventoryapp",
+  storageBucket: "londisinventoryapp.firebasestorage.app",
+  messagingSenderId: "990186016538",
+  appId: "1:990186016538:web:e69f834cb120e62e5966a3"
+};
+
+let firebaseAppInstance;
+let authInstance;
+let dbInstance;
+
+if (!firebaseAppInstance) {
+  try {
+    firebaseAppInstance = initializeApp(firebaseConfig);
+    authInstance = getAuth(firebaseAppInstance);
+    dbInstance = getFirestore(firebaseAppInstance);
+    console.log("SignUpModal: Firebase initialized successfully.");
+  } catch (error) {
+    console.error("SignUpModal: Firebase initialization error:", error);
+  }
+}
+
+// Global variable for appId
+const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
+
 
 function SignUpModal({ onClose, onSignUpSuccess }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [mobileNumber, setMobileNumber] = useState(''); // Added mobile number
+  const [employeeId, setEmployeeId] = useState(''); // Added employee ID
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -15,19 +47,32 @@ function SignUpModal({ onClose, onSignUpSuccess }) {
     e.preventDefault();
     setError('');
 
+    if (!authInstance || !dbInstance) {
+      setError('Firebase services not initialized. Please try again.');
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
       return;
     }
 
+    if (!mobileNumber || !employeeId) {
+        setError("Mobile Number and Employee ID are required.");
+        return;
+    }
+
     setLoading(true);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(authInstance, email, password);
       const user = userCredential.user;
 
-      // Store user information in Firestore
-      await setDoc(doc(db, "users", user.uid), {
+      // Store user information in Firestore (private data for this user)
+      // Path: /artifacts/{appId}/users/{userId}/user_details/{documentId}
+      await setDoc(doc(dbInstance, `artifacts/${appId}/users/${user.uid}/user_details`, user.uid), {
         email: user.email,
+        mobileNumber: mobileNumber,
+        employeeId: employeeId,
         createdAt: new Date(),
         // Add any other default fields you need, e.g., role: 'user'
       });
@@ -42,24 +87,25 @@ function SignUpModal({ onClose, onSignUpSuccess }) {
   };
 
   return (
-    <div style={styles.modalOverlay}>
-      <div style={styles.modalContent}>
-        <h2>Sign Up</h2>
-        <form onSubmit={handleSignUp} style={styles.form}>
+    <div className="fixed inset-0 bg-gray-900 bg-opacity-75 flex justify-center items-center z-50 p-4">
+      <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md">
+        <h2 className="text-3xl font-bold text-center text-gray-800 mb-6">Create Account</h2>
+        {error && <p className="text-red-600 text-center mb-4">{error}</p>}
+        <form onSubmit={handleSignUp} className="space-y-4">
           <input
             type="email"
-            placeholder="Email"
+            placeholder="Email Address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={styles.input}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             required
           />
           <input
             type="password"
-            placeholder="Password"
+            placeholder="Password (min 6 characters)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            style={styles.input}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             required
           />
           <input
@@ -67,14 +113,37 @@ function SignUpModal({ onClose, onSignUpSuccess }) {
             placeholder="Confirm Password"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            style={styles.input}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             required
           />
-          {error && <p style={styles.errorText}>{error}</p>}
-          <button type="submit" style={styles.button} disabled={loading}>
-            {loading ? 'Signing Up...' : 'Sign Up'}
+          <input
+            type="tel"
+            placeholder="Mobile Number (e.g., +447911123456)"
+            value={mobileNumber}
+            onChange={(e) => setMobileNumber(e.target.value)}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+          <input
+            type="text"
+            placeholder="Employee ID"
+            value={employeeId}
+            onChange={(e) => setEmployeeId(e.target.value)}
+            className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
+          <button
+            type="submit"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition duration-300 ease-in-out"
+            disabled={loading}
+          >
+            {loading ? 'Creating...' : 'Sign Up'}
           </button>
-          <button type="button" onClick={onClose} style={{ ...styles.button, ...styles.cancelButton }}>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-3 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50 transition duration-300 ease-in-out mt-2"
+          >
             Cancel
           </button>
         </form>
@@ -82,66 +151,5 @@ function SignUpModal({ onClose, onSignUpSuccess }) {
     </div>
   );
 }
-
-const styles = {
-  modalOverlay: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  modalContent: {
-    backgroundColor: 'white',
-    padding: '30px',
-    borderRadius: '10px',
-    boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)',
-    width: '90%',
-    maxWidth: '400px',
-    textAlign: 'center',
-  },
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '15px',
-    marginTop: '20px',
-  },
-  input: {
-    padding: '12px',
-    border: '1px solid #ddd',
-    borderRadius: '5px',
-    fontSize: '1em',
-  },
-  button: {
-    padding: '12px 20px',
-    backgroundColor: '#61dafb',
-    color: '#282c34',
-    border: 'none',
-    borderRadius: '5px',
-    cursor: 'pointer',
-    fontSize: '1em',
-    transition: 'background-color 0.3s ease',
-  },
-  buttonHover: {
-    backgroundColor: '#a2edff',
-  },
-  cancelButton: {
-    backgroundColor: '#6c757d',
-    color: 'white',
-    marginTop: '10px',
-  },
-  cancelButtonHover: {
-    backgroundColor: '#5a6268',
-  },
-  errorText: {
-    color: '#dc3545',
-    marginBottom: '10px',
-  },
-};
 
 export default SignUpModal;

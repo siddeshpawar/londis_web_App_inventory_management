@@ -1,29 +1,27 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow any authenticated user to read products
+    // Allow any authenticated user to read and write to the /products collection
+    // This covers product data like barcode, name, category, quantity, and expiryDates
     match /products/{document=**} {
-      allow read: if request.auth != null;
-      // Allow authenticated users to write (add, update, delete) products.
-      // You might want to refine this further to only allow specific roles/users.
-      allow write: if request.auth != null;
+      allow read, write: if request.auth != null;
     }
 
     // Rules for appSettings collection (specifically the 'messages' document)
+    // Allows owner (siddeshpawar622.sp@gmail.com) to write, and anyone to read
     match /appSettings/messages {
-      // Allow only the owner to write (create, update, delete) this document
       allow write: if request.auth.token.email == 'siddeshpawar622.sp@gmail.com';
-      // Allow ANYONE (authenticated or not) to read this document
       allow read: if true;
     }
 
-    // Allow authenticated users to create/read/update their own user document in the 'users' collection
-    match /users/{userId} {
-      allow read, update: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null && request.auth.uid == userId;
+    // Allow authenticated users to create/read/update their own user document in the 'user_details' collection
+    // This is for storing additional user profile data.
+    match /artifacts/{appId}/users/{userId}/user_details/{document=**} {
+      allow read, create, update: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Deny access to other collections by default if not explicitly allowed
+    // Deny access to all other collections by default.
+    // This is a crucial security measure to prevent unauthorized access to any other data.
     match /{document=**} {
       allow read, write: if false;
     }
