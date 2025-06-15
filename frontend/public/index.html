@@ -18,9 +18,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
 
     <!-- html5-qrcode CDN -->
-    <script src="https://unpkg.com/html5-qrcode"></script>
+    <!-- Ensure this is loaded before your React app script -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
     <!-- moment.js CDN -->
+    <!-- Ensure this is loaded before your React app script -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
 
     <!-- Inter Font from Google Fonts -->
@@ -36,7 +38,8 @@
         }
 
         /* Basic styling for the scanner video */
-        #reader {
+        /* Updated #reader to #qr-code-reader as per App.js change */
+        #qr-code-reader {
             width: 100%;
             max-width: 500px;
             margin: 20px auto;
@@ -46,7 +49,8 @@
         }
 
         /* Hide HTML5-QRCode dashboard elements if not needed */
-        #reader__dashboard {
+        /* Updated #reader__dashboard to #qr-code-reader__dashboard */
+        #qr-code-reader__dashboard {
             display: none; /* Hide the default dashboard buttons */
         }
 

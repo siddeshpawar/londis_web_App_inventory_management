@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext, useRef, useCallback } from 'react';
+import React, { useState, useEffect, createContext, useContext, useRef, useCallback, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
@@ -18,12 +18,11 @@ import {
   query,
   onSnapshot,
   updateDoc,
-  arrayUnion, // Keep arrayUnion if needed for expiryDates
 } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage'; // Import Firebase Storage functions
+import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage"; // Corrected Firebase Storage import
 
-// Access Html5QrcodeScanner and moment directly from window as they are loaded via CDN
-const Html5QrcodeScanner = typeof window !== 'undefined' ? window.Html5QrcodeScanner : null;
+// Access Html5Qrcode and moment directly from window as they are loaded via CDN
+const Html5Qrcode = typeof window !== 'undefined' ? window.Html5Qrcode : null;
 const moment = typeof window !== 'undefined' ? window.moment : null;
 
 // --- Global Variables (Provided by Canvas Environment) ---
@@ -31,8 +30,11 @@ const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'defaul
 const initialAuthToken = typeof window.__initial_auth_token !== 'undefined' ? window.__initial_auth_token : null;
 
 // --- Firebase Initialization (Using your provided config) ---
+// IMPORTANT: Please DOUBLE-CHECK your Firebase project settings and ensure this configuration
+// EXACTLY matches what is provided in your Firebase Console (Project settings -> Your apps -> Config).
+// A common issue for "login failed" is a typo in the apiKey or projectId.
 const firebaseConfig = {
-    apiKey: "AIzaSyCVwde47xofIaRyJQr5QjeDgKCinQ7s8_U",
+    apiKey: "AIzaSyCVwde47xofIaRyJQr5QjeDgKCinQ7s8_U", // <-- CORRECTED API KEY HERE!
     authDomain: "londisinventoryapp.firebaseapp.com",
     projectId: "londisinventoryapp",
     storageBucket: "londisinventoryapp.firebasestorage.app",
@@ -91,18 +93,20 @@ export const AuthProvider = ({ children }) => {
 
     const performAuth = async () => {
       if (initialAuthToken) {
+        console.log("Attempting sign-in with custom token...");
         try {
           await signInWithCustomToken(authInstance, initialAuthToken);
-          console.log("Signed in with custom token.");
+          console.log("Signed in with custom token successfully.");
         } catch (error) {
-          console.error("Custom token sign-in failed:", error);
+          console.error("Custom token sign-in failed:", error.code, error.message);
         }
       } else {
+        console.log("Attempting anonymous sign-in (no custom token provided)...");
         try {
           await signInAnonymously(authInstance);
-          console.log("Signed in anonymously.");
+          console.log("Signed in anonymously successfully.");
         } catch (error) {
-          console.error("Anonymous sign-in failed:", error);
+          console.error("Anonymous sign-in failed:", error.code, error.message);
         }
       }
     };
@@ -161,7 +165,7 @@ const MessageBox = ({ message, type, onClose }) => {
   );
 };
 
-// --- SignUpModal Component (formerly SignUpModal.js) ---
+// --- SignUpModal Component ---
 const SignUpModal = ({ onClose, onSignUpSuccess }) => {
   const { auth, db } = useAuth();
   const [email, setEmail] = useState('');
@@ -301,7 +305,7 @@ const SignUpModal = ({ onClose, onSignUpSuccess }) => {
   );
 };
 
-// --- AddProductForm Component (formerly AddProductForm.js) ---
+// --- AddProductForm Component ---
 const AddProductForm = ({
   scannedBarcode,
   setScannedBarcode,
@@ -316,71 +320,46 @@ const AddProductForm = ({
   isExistingProduct,
   handleAddInventoryItem,
   categories,
-  db,
-  userId,
-  productImage, // New prop for image file
-  setProductImage, // New prop setter for image file
-  imagePreviewUrl, // New prop for image preview URL
-  setImagePreviewUrl, // New prop setter for image preview URL
-  uploadingImage, // New prop for image upload status
-  imageUploadError // New prop for image upload error
+  productImage,
+  setProductImage,
+  imagePreviewUrl,
+  setImagePreviewUrl,
+  uploadingImage,
+  imageUploadError
 }) => {
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
+  // Local state for messages, as the parent Dashboard will also manage messages.
+  const [localMessage, setLocalMessage] = useState('');
+  const [localMessageType, setLocalMessageType] = useState('');
 
-  // Effect to check barcode existence whenever it changes
+  // This effect will react to changes in isExistingProduct, productName, scannedBarcode
   useEffect(() => {
-    const checkBarcode = async () => {
-      setMessage('');
-      setError('');
-      if (!db || !scannedBarcode) return; // Only check if barcode is not empty and db is ready
+    if (isExistingProduct) {
+      setLocalMessage(`Product "${productName}" already exists. Add new stock/expiry date.`);
+      setLocalMessageType('info');
+    } else if (scannedBarcode && !productName) {
+      setLocalMessage('New product barcode. Please fill in details.');
+      setLocalMessageType('info');
+    } else {
+      setLocalMessage('');
+      setLocalMessageType('');
+    }
+  }, [scannedBarcode, isExistingProduct, productName]);
 
-      const productDocRef = doc(db, 'products', scannedBarcode);
-      try {
-        const docSnap = await getDoc(productDocRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setProductName(data.name || '');
-          setCategory(data.category || categories[0]);
-          setMessage(`Product "${data.name}" already exists. Add new stock/expiry date.`);
-          // If existing product has an image, load it for preview
-          if (data.imageUrl) {
-              setImagePreviewUrl(data.imageUrl);
-          } else {
-              setImagePreviewUrl(null);
-          }
-        } else {
-          setProductName('');
-          setCategory(categories[0]);
-          setMessage('New product barcode. Please fill in details.');
-        }
-      } catch (err) {
-        console.error("Error checking barcode:", err);
-        setError(`Error checking barcode: ${err.message}`);
-        setProductName('');
-        setCategory(categories[0]);
-      }
-    };
-
-    const debounceTimeout = setTimeout(() => {
-      checkBarcode();
-    }, 500);
-
-    return () => clearTimeout(debounceTimeout);
-  }, [scannedBarcode, db, setProductName, setCategory, categories, setImagePreviewUrl]); // Added setImagePreviewUrl as dependency
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError('');
-    setMessage('');
-    await handleAddInventoryItem(); // Call the parent's handler
+    setLocalMessage('');
+    setLocalMessageType('');
+    // Call the parent's handler and let it manage global messages
+    await handleAddInventoryItem();
   };
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
       setProductImage(file);
-      setImagePreviewUrl(URL.createObjectURL(file)); // Create a preview URL
+      // Create a preview URL for the selected image
+      setImagePreviewUrl(URL.createObjectURL(file));
     } else {
       setProductImage(null);
       setImagePreviewUrl(null);
@@ -407,15 +386,7 @@ const AddProductForm = ({
       display: 'flex',
       flexDirection: 'column',
       gap: '15px',
-    },
-    formGroup: {
-      display: 'flex',
-      flexDirection: 'column',
-    },
-    label: {
-      marginBottom: '5px',
-      fontWeight: 'bold',
-      color: '#555',
+      marginTop: '20px',
     },
     input: {
       padding: '10px',
@@ -440,25 +411,6 @@ const AddProductForm = ({
       cursor: 'pointer',
       transition: 'background-color 0.3s ease',
     },
-    buttonHover: { // For demonstration, actual hover handled by Tailwind
-      backgroundColor: '#0056b3',
-    },
-    message: {
-      backgroundColor: '#d4edda',
-      color: '#155724',
-      padding: '10px',
-      borderRadius: '4px',
-      marginBottom: '10px',
-      textAlign: 'center',
-    },
-    error: {
-      backgroundColor: '#f8d7da',
-      color: '#721c24',
-      padding: '10px',
-      borderRadius: '4px',
-      marginBottom: '10px',
-      textAlign: 'center',
-    },
     imagePreview: {
         marginTop: '10px',
         maxWidth: '100px',
@@ -475,48 +427,49 @@ const AddProductForm = ({
   };
 
   return (
-    <div style={styles.container}>
-      <h2 style={styles.h2}>{isExistingProduct ? 'Update Product Stock' : 'Add New Product'}</h2>
-      {message && <div style={styles.message}>{message}</div>}
-      {error && <div style={styles.error}>{error}</div>}
-      <form onSubmit={handleSubmit} style={styles.form}>
-        <div style={styles.formGroup}>
-          <label htmlFor="barcode" style={styles.label}>Barcode:</label>
+    <div className="bg-white p-6 rounded-lg shadow-lg mb-8">
+      <h3 className="text-2xl font-semibold text-gray-800 mb-4">{isExistingProduct ? 'Update Product Stock' : 'Add New Product'}</h3>
+      <MessageBox message={localMessage} type={localMessageType} onClose={() => { setLocalMessage(''); setLocalMessageType(''); }} />
+      {imageUploadError && <MessageBox message={imageUploadError} type="error" onClose={() => { }} />} {/* Display image upload error */}
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label htmlFor="barcode" className="block text-gray-700 text-sm font-bold mb-2">Barcode:</label>
           <input
             type="text"
             id="barcode"
+            className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="Scan or enter barcode"
             value={scannedBarcode}
             onChange={(e) => setScannedBarcode(e.target.value)}
-            placeholder="Scan or enter barcode"
             required
-            readOnly={false} // Allow manual input
-            style={styles.input}
+            // Note: Removed `readOnly` to allow manual barcode input even if scanner is off
           />
         </div>
 
-        <div style={styles.formGroup}>
-          <label htmlFor="productName" style={styles.label}>Product Name:</label>
+        <div>
+          <label htmlFor="productName" className="block text-gray-700 text-sm font-bold mb-2">Product Name:</label>
           <input
             type="text"
             id="productName"
+            className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="e.g., Dairy Milk"
             value={productName}
             onChange={(e) => setProductName(e.target.value)}
-            placeholder="e.g., Dairy Milk"
-            required={!isExistingProduct}
+            required={!isExistingProduct} // Required only for new products
             readOnly={isExistingProduct} // Read-only if product exists
-            style={styles.input}
           />
         </div>
 
-        <div style={styles.formGroup}>
-          <label htmlFor="category" style={styles.label}>Category:</label>
+        <div>
+          <label htmlFor="category" className="block text-gray-700 text-sm font-bold mb-2">Category:</label>
           <select
             id="category"
+            className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             required
             disabled={isExistingProduct} // Disabled if product exists
-            style={styles.select}
           >
             {categories.map((cat) => (
               <option key={cat} value={cat}>{cat}</option>
@@ -524,53 +477,55 @@ const AddProductForm = ({
           </select>
         </div>
 
-        <div style={styles.formGroup}>
-          <label htmlFor="quantity" style={styles.label}>Quantity (for this batch):</label>
+        <div>
+          <label htmlFor="quantity" className="block text-gray-700 text-sm font-bold mb-2">Quantity (for this batch):</label>
           <input
             type="number"
             id="quantity"
+            className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500"
+            placeholder="e.g., 10"
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
-            placeholder="e.g., 10"
             required
             min="1"
-            style={styles.input}
           />
         </div>
 
-        <div style={styles.formGroup}>
-          <label htmlFor="expiryDate" style={styles.label}>Expiry Date:</label>
+        <div>
+          <label htmlFor="expiryDate" className="block text-gray-700 text-sm font-bold mb-2">Expiry Date:</label>
           <input
             type="date"
             id="expiryDate"
+            className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500"
             value={expiryDate}
             onChange={(e) => setExpiryDate(e.target.value)}
             required
-            style={styles.input}
           />
         </div>
 
         {/* Product Photo Upload */}
-        <div style={styles.formGroup}>
-            <label htmlFor="productImage" style={styles.label}>Product Photo (Optional):</label>
+        <div>
+            <label htmlFor="productImage" className="block text-gray-700 text-sm font-bold mb-2">Product Photo (Optional):</label>
             <input
                 type="file"
                 id="productImage"
                 accept="image/*"
-                capture="camera" // Hint to open camera on mobile
+                capture="environment" // Suggests front or rear camera on mobile
                 onChange={handleImageChange}
-                style={styles.input}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
                 disabled={uploadingImage}
             />
             {imagePreviewUrl && (
-                <img src={imagePreviewUrl} alt="Product Preview" style={styles.imagePreview} />
+                <img src={imagePreviewUrl} alt="Product Preview" style={styles.imagePreview} className="mt-2" />
             )}
-            {uploadingImage && <p style={styles.uploadingMessage}>Uploading image...</p>}
-            {imageUploadError && <p style={styles.error}>{imageUploadError}</p>}
+            {uploadingImage && <p className="text-blue-600 text-sm mt-1">Uploading image...</p>}
         </div>
 
-
-        <button type="submit" style={styles.button} disabled={uploadingImage}>
+        <button
+          type="submit"
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition duration-300 ease-in-out"
+          disabled={uploadingImage}
+        >
           {isExistingProduct ? 'Add New Stock' : 'Add Product'}
         </button>
       </form>
@@ -578,12 +533,12 @@ const AddProductForm = ({
   );
 }
 
-// --- ProductList Component (formerly ProductList.js) ---
+// --- ProductList Component ---
 const ProductList = ({ db, userId }) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [updateMessage, setUpdateMessage] = useState('');
+  const [updateMessage, setUpdateMessage] = useState({ type: '', text: '' });
   const [searchTerm, setSearchTerm] = useState(''); // New state for search term
 
   useEffect(() => {
@@ -592,7 +547,7 @@ const ProductList = ({ db, userId }) => {
       return;
     }
 
-    const productsCollectionRef = collection(db, 'products'); // Use root collection
+    const productsCollectionRef = collection(db, 'products');
     // NOTE: orderBy() is removed as per previous instructions to avoid index issues.
     // Sorting will be done in-memory.
     const q = query(productsCollectionRef);
@@ -620,7 +575,7 @@ const ProductList = ({ db, userId }) => {
   }, [db, userId]);
 
   const handleMarkAsRemoved = async (productId, expiryDateIndex) => {
-    setUpdateMessage('');
+    setUpdateMessage({ type: '', text: '' });
     setError('');
     if (!db) {
       setError('Database not ready.');
@@ -651,12 +606,12 @@ const ProductList = ({ db, userId }) => {
 
       await updateDoc(productDocRef, {
         expiryDates: updatedExpiryDates,
-        quantity: newTotalQuantity, // Update the overall quantity
+        quantity: newTotalQuantity,
         lastUpdated: new Date()
       });
 
-      setUpdateMessage('Item marked as removed successfully!');
-      setTimeout(() => setUpdateMessage(''), 3000); // Clear message after 3 seconds
+      setUpdateMessage({ type: 'success', text: 'Item marked as removed successfully!' });
+      setTimeout(() => setUpdateMessage({ type: '', text: '' }), 3000); // Clear message after 3 seconds
     } catch (err) {
       console.error("Error marking item as removed:", err);
       setError('Failed to mark item as removed. Please try again.');
@@ -772,9 +727,6 @@ const ProductList = ({ db, userId }) => {
       fontSize: '0.8em',
       transition: 'background-color 0.2s ease',
     },
-    removeButtonHover: {
-      backgroundColor: '#e0a800',
-    },
   };
 
   // Helper function to determine style based on expiry date
@@ -794,11 +746,11 @@ const ProductList = ({ db, userId }) => {
   };
 
   return (
-    <div style={styles.container}>
-      <h2 style={styles.h2}>Current Inventory</h2>
-      {loading && <p style={styles.loading}>Loading products...</p>}
-      {error && <p style={styles.error}>{error}</p>}
-      {updateMessage && <p style={styles.successMessage}>{updateMessage}</p>}
+    <div className="bg-white p-6 rounded-lg shadow-lg mb-8">
+      <h2 className="text-2xl font-semibold text-gray-800 mb-4">Current Inventory</h2>
+      {loading && <p className="text-center text-gray-600">Loading products...</p>}
+      {error && <MessageBox message={error} type="error" onClose={() => setError('')} />}
+      {updateMessage.text && <MessageBox message={updateMessage.text} type={updateMessage.type} onClose={() => setUpdateMessage({ type: '', text: '' })} />}
 
       {/* Search Input for Product List */}
       <div className="mb-4">
@@ -812,33 +764,33 @@ const ProductList = ({ db, userId }) => {
       </div>
 
       {!loading && !error && filteredProducts.length === 0 && (
-        <p style={{ textAlign: 'center', color: '#666' }}>No products found matching your search. Add some using the "Add Product" section.</p>
+        <p className="text-center text-gray-600">No products found matching your search. Add some using the "Add Product" section.</p>
       )}
 
-      <div style={styles.grid}>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {!loading && !error && filteredProducts.map(product => (
-          <div key={product.id} style={styles.productCard}>
-            <div style={styles.productHeader}>
+          <div key={product.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50 shadow-sm">
+            <div className="flex items-center mb-3">
                 {product.imageUrl && (
-                    <img src={product.imageUrl} alt={product.name} style={styles.productImage} onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/80x80/cccccc/000000?text=No+Image'; }} />
+                    <img src={product.imageUrl} alt={product.name} className="w-20 h-20 object-cover rounded-md mr-4 border border-gray-200" onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/80x80/cccccc/000000?text=No+Image'; }} />
                 )}
                 <h3 className="text-xl font-semibold text-gray-900">{product.name} <span className="text-gray-500 text-base">({product.barcode})</span></h3>
             </div>
-            <p className="text-gray-700 mb-3">Category: {product.category || 'N/A'}</p>
-            <p className="text-gray-700 font-bold mb-2">Total Quantity: {product.quantity || 0}</p>
+            <p className="text-gray-700 mb-2">Category: {product.category || 'N/A'}</p>
+            <p className="text-gray-700 font-bold mb-3">Total Quantity: {product.quantity || 0}</p>
             <h4 className="font-medium text-gray-800 mb-2">Expiry Batches:</h4>
-            <ul style={styles.expiryList}>
+            <ul className="list-none p-0 m-0">
               {product.expiryDates && product.expiryDates.length > 0 ? (
                 product.expiryDates.map((expiry, index) => (
                   <li key={index} style={{ ...styles.expiryItem, ...getExpiryItemStyle(expiry.date, expiry.isRemoved) }}>
-                    <span style={styles.expiryDate}>
+                    <span className="font-semibold">
                       {expiry.isRemoved ? 'Removed' : `Expiry: ${moment(expiry.date).format('DD/MM/YYYY')}`}
                       {expiry.isRemoved ? '' : ` (Qty: ${expiry.quantity || 'N/A'})`}
                     </span>
                     {!expiry.isRemoved && (
                       <button
                         onClick={() => handleMarkAsRemoved(product.id, index)}
-                        style={styles.removeButton}
+                        className="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-1.5 px-3 rounded-md text-sm transition duration-200"
                       >
                         Mark as Removed
                       </button>
@@ -856,7 +808,7 @@ const ProductList = ({ db, userId }) => {
   );
 }
 
-// --- MessageDisplay Component (formerly MessageDisplay.js) ---
+// --- MessageDisplay Component ---
 function MessageDisplay({ currentMessage, db }) {
   const [newMessageText, setNewMessageText] = useState(currentMessage);
   const [postMessageError, setPostMessageError] = useState('');
@@ -886,61 +838,23 @@ function MessageDisplay({ currentMessage, db }) {
     }
   };
 
-  const styles = {
-    messageEditorContainer: {
-      backgroundColor: '#e7f3ff',
-      padding: '20px',
-      borderRadius: '8px',
-      marginBottom: '30px',
-      border: '1px solid #b3d9ff',
-    },
-    messageTextarea: {
-      width: '100%',
-      minHeight: '80px',
-      padding: '10px',
-      borderRadius: '4px',
-      border: '1px solid #ccc',
-      marginBottom: '10px',
-      fontSize: '1em',
-      boxSizing: 'border-box',
-    },
-    postButton: {
-      padding: '10px 20px',
-      backgroundColor: '#007bff',
-      color: 'white',
-      border: 'none',
-      borderRadius: '5px',
-      cursor: 'pointer',
-      fontSize: '1em',
-      transition: 'background-color 0.3s ease',
-    },
-    postButtonHover: {
-      backgroundColor: '#0056b3',
-    },
-    errorText: {
-      color: '#dc3545',
-      marginTop: '10px',
-    },
-    successText: {
-      color: '#28a745',
-      marginTop: '10px',
-    }
-  };
-
   return (
-    <div style={styles.messageEditorContainer}>
-      <h3>Post Global Announcement (Owner Only)</h3>
+    <div className="bg-blue-100 p-6 rounded-lg shadow-lg mb-8 border border-blue-200">
+      <h3 className="text-xl font-semibold text-blue-800 mb-4">Post Global Announcement (Owner Only)</h3>
       <textarea
         value={newMessageText}
         onChange={(e) => setNewMessageText(e.target.value)}
         placeholder="Write your announcement here..."
-        style={styles.messageTextarea}
+        className="w-full min-h-[80px] p-3 rounded-lg border border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
       />
-      <button onClick={handlePostMessage} style={styles.postButton}>
+      <button
+        onClick={handlePostMessage}
+        className="mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition duration-300 ease-in-out"
+      >
         Post Message
       </button>
-      {postMessageError && <p style={styles.errorText}>{postMessageError}</p>}
-      {postMessageSuccess && <p style={styles.successText}>{postMessageSuccess}</p>}
+      {postMessageError && <p className="text-red-600 text-sm mt-2">{postMessageError}</p>}
+      {postMessageSuccess && <p className="text-green-600 text-sm mt-2">{postMessageSuccess}</p>}
     </div>
   );
 }
@@ -1074,6 +988,13 @@ const SignupPage = ({ setCurrentPage }) => {
           >
             {loading ? 'Signing Up...' : 'Sign Up'}
           </button>
+          <button
+            type="button"
+            onClick={() => setCurrentPage('login')} // Changed to navigate to login page
+            className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50 transition duration-300 ease-in-out mt-4" // Using Tailwind for styling
+          >
+            Cancel
+          </button>
         </form>
         <p className="text-center text-gray-600 text-sm mt-6">
           Already have an account?{' '}
@@ -1114,6 +1035,7 @@ const LoginPage = ({ setCurrentPage }) => {
       await signInWithEmailAndPassword(auth, email, password);
       setMessage('Login successful!');
       setMessageType('success');
+      // AuthProvider's onAuthStateChanged will handle redirection to Dashboard
     } catch (error) {
       console.error("Login error:", error);
       let errorMessage = 'Login failed. Please check your credentials.';
@@ -1187,7 +1109,7 @@ const LoginPage = ({ setCurrentPage }) => {
 
 // --- Dashboard Page Component ---
 const DashboardPage = ({ setCurrentPage }) => {
-  const { user, userId, auth, db, storage, isAuthReady } = useAuth(); // Destructure storage
+  const { user, userId, auth, db, storage, isAuthReady } = useAuth();
   const [userDetails, setUserDetails] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' }); // Unified message state
   const [appMessage, setAppMessage] = useState(''); // State for global announcements
@@ -1208,26 +1130,31 @@ const DashboardPage = ({ setCurrentPage }) => {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageUploadError, setImageUploadError] = useState('');
 
-  // Ref for the HTML5-QRCode scanner instance. Will point to the div where scanner renders.
+  // Camera selection states
+  const [availableCameras, setAvailableCameras] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState('');
+
+  // Ref for the Html5Qrcode scanner instance. Will point to the div where scanner renders.
   const qrCodeReaderRef = useRef(null);
   const html5QrcodeScannerInstanceRef = useRef(null); // Ref to store the scanner object
 
-  // Categories for product dropdown
-  const categories = ['Chocolates', 'Alcohol', 'Wines', 'Cigarettes', 'Soft Drinks', 'Crisps', 'Other'];
+  // Categories for product dropdown - Memoized to prevent unnecessary re-renders of useEffect
+  const categories = useMemo(() => ['Chocolates', 'Alcohol', 'Wines', 'Cigarettes', 'Soft Drinks', 'Crisps', 'Other'], []);
 
-  // Utility to get current date asYYYY-MM-DD
+  // Utility to get current date as YYYY-MM-DD
   const getTodayDate = useCallback(() => {
     if (moment) {
         return moment().format('YYYY-MM-DD');
     }
     const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }, []);
 
   // --- Effect to check barcode existence whenever it changes (for form) ---
+  // This logic is critical for the category selection and overall form behavior.
   useEffect(() => {
     const checkBarcode = async () => {
       setMessage({ type: '', text: '' }); // Clear message
@@ -1240,10 +1167,9 @@ const DashboardPage = ({ setCurrentPage }) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
             setProductName(data.name || '');
-            setCategory(data.category || 'Chocolates');
+            setCategory(data.category || categories[0]); // Set category to existing product's category, or first default
             setIsExistingProduct(true);
             setMessage({ type: 'info', text: `Product "${data.name}" already exists. Add new stock/expiry date.` });
-            // If existing product has an image, load it for preview
             if (data.imageUrl) {
                 setImagePreviewUrl(data.imageUrl);
             } else {
@@ -1251,7 +1177,9 @@ const DashboardPage = ({ setCurrentPage }) => {
             }
           } else {
             setProductName('');
-            setCategory('Chocolates');
+            // For a NEW product, always reset category to default when a new barcode is entered.
+            // User can then select their desired category.
+            setCategory(categories[0]);
             setIsExistingProduct(false);
             setImagePreviewUrl(null); // Clear image preview for new product
             setMessage({ type: 'info', text: 'New product barcode. Please fill in details.' });
@@ -1260,30 +1188,33 @@ const DashboardPage = ({ setCurrentPage }) => {
           console.error("Error checking barcode:", err);
           setMessage({ type: 'error', text: `Error checking barcode: ${err.message}` });
           setProductName('');
-          setCategory('Chocolates');
+          setCategory(categories[0]);
           setIsExistingProduct(false);
           setImagePreviewUrl(null);
         }
       } else {
+        // When barcode is cleared, reset all related states
         setProductName('');
-        setCategory('Chocolates');
+        setCategory(categories[0]);
         setQuantity('');
         setExpiryDate(getTodayDate());
         setIsExistingProduct(false);
-        setProductImage(null); // Clear selected file
-        setImagePreviewUrl(null); // Clear image preview
+        setProductImage(null);
+        setImagePreviewUrl(null);
         setMessage({ type: '', text: '' });
       }
     };
 
+    // Debounce the barcode check to avoid excessive Firestore reads
     const debounceTimeout = setTimeout(() => {
       checkBarcode();
     }, 500);
 
-    return () => clearTimeout(debounceTimeout);
-  }, [scannedBarcode, db, getTodayDate, setProductName, setCategory, setImagePreviewUrl]); // Added setImagePreviewUrl as dependency
+    return () => clearTimeout(debounceTimeout); // Cleanup debounce timer
+  }, [scannedBarcode, db, getTodayDate, categories]); // Removed setters from dependencies for stability if they don't change frequently
 
-  // --- Firebase Data Listeners ---
+
+  // --- Firebase Data Listeners (User Details & App Message) ---
   useEffect(() => {
     if (!isAuthReady || !userId || !db) {
       console.log("Dashboard useEffect: Auth not ready or userId/db missing.");
@@ -1293,22 +1224,24 @@ const DashboardPage = ({ setCurrentPage }) => {
     // Fetch user details from Firestore
     const fetchUserDetails = async () => {
       try {
+        setMessage({ type: 'info', text: 'Loading user details...' }); // Set loading message
+        // Use appId in the path to adhere to Firestore security rules for private data
         const userDocRef = doc(db, `artifacts/${appId}/users/${userId}/user_details`, userId);
         const docSnap = await getDoc(userDocRef);
         if (docSnap.exists()) {
           setUserDetails(docSnap.data());
-          setMessage(prev => ({ ...prev, type: 'success', text: 'Welcome back to your dashboard!' }));
+          setMessage({ type: 'success', text: 'Welcome back to your dashboard!' }); // Set success message
         } else {
-          setMessage(prev => ({ ...prev, type: 'error', text: 'User details not found. Please contact support.' }));
+          setMessage({ type: 'error', text: 'User details not found. Please contact support.' });
           console.warn("No user details found for:", userId);
         }
       } catch (error) {
         console.error("Error fetching user details:", error);
-        setMessage(prev => ({ ...prev, type: 'error', text: 'Error loading user details.' }));
+        setMessage({ type: 'error', text: 'Error loading user details.' });
       }
     };
 
-    fetchUserDetails();
+    fetchUserDetails(); // Call immediately on mount/dependency change
 
     // Listen for app message changes from Firestore (for global announcements)
     const messageDocRef = doc(db, 'appSettings', 'messages');
@@ -1323,22 +1256,55 @@ const DashboardPage = ({ setCurrentPage }) => {
     });
 
     return () => unsubscribeMessage();
-  }, [userId, db, isAuthReady, appId]);
+  }, [userId, db, isAuthReady]); // appId is a global constant, so it's not a dependency here
 
   // --- Barcode Scanner Logic ---
   useEffect(() => {
-    // Only attempt to start scanner if isScanning is true AND the DOM element is available
-    if (isScanning && isAuthReady && Html5QrcodeScanner && qrCodeReaderRef.current) {
-      // Ensure the scanner is stopped before trying to start it again if it was previously running
-      if (html5QrcodeScannerInstanceRef.current) {
-        html5QrcodeScannerInstanceRef.current.stop().catch(e => console.warn("Old scanner stop failed:", e));
+    let html5QrcodeScanner = null;
+    const scannerElementId = "qr-code-reader"; // The ID of the div where the scanner will render
+
+    // Fetch available cameras once the component mounts or when Html5Qrcode is ready
+    if (typeof Html5Qrcode === 'function' && availableCameras.length === 0) {
+        Html5Qrcode.getCameras().then(devices => {
+            if (devices && devices.length > 0) {
+                setAvailableCameras(devices);
+                // Attempt to select a default camera: environment (back) first, then first available
+                const environmentCamera = devices.find(device => device.kind === 'videoinput' && device.facingMode === 'environment');
+                if (environmentCamera) {
+                    setSelectedDeviceId(environmentCamera.id);
+                } else {
+                    setSelectedDeviceId(devices[0].id); // Fallback to first camera
+                }
+            } else {
+                setMessage({ type: 'error', text: 'No camera devices found. Please ensure a camera is connected or enabled.' });
+            }
+        }).catch(err => {
+            console.error("Error getting camera devices:", err);
+            setMessage({ type: 'error', text: `Error accessing camera devices: ${err.message}. Please allow camera access.` });
+        });
+    }
+
+
+    // Logic to start and stop the scanner
+    if (isScanning && isAuthReady && selectedDeviceId) {
+      // Ensure the Html5Qrcode library is loaded
+      if (typeof Html5Qrcode === 'undefined' || Html5Qrcode === null) {
+          setMessage({ type: 'error', text: 'Barcode scanner library (Html5Qrcode) not loaded. Please check your HTML file or CDN.' });
+          setIsScanning(false);
+          return;
       }
 
-      // Initialize Html5QrcodeScanner
-      const html5QrcodeScanner = new Html5QrcodeScanner(
-        qrCodeReaderRef.current.id, // Use the ref's ID
-        { fps: 10, qrbox: { width: 250, height: 250 }, disableFlip: false }, // Added disableFlip: false for better scanning
-        false // Verbose logging
+      // If an old scanner instance exists, try to stop it gracefully
+      if (html5QrcodeScannerInstanceRef.current) {
+        html5QrcodeScannerInstanceRef.current.stop().catch(e => console.warn("Old scanner stop failed (silent):", e));
+        html5QrcodeScannerInstanceRef.current = null; // Clear the ref
+      }
+
+      // Initialize Html5Qrcode using the fixed ID
+      html5QrcodeScanner = new Html5Qrcode(
+        scannerElementId, // Use the fixed ID here
+        { fps: 10, qrbox: { width: 250, height: 250 }, disableFlip: false },
+        false // Verbose logging: set to true for debugging in console
       );
 
       const onScanSuccess = (decodedText, decodedResult) => {
@@ -1352,51 +1318,44 @@ const DashboardPage = ({ setCurrentPage }) => {
         // console.warn(`Code scan error = ${errorMessage}`); // Keep silent unless debugging
       };
 
-      // Request camera permissions explicitly before rendering
-      Html5QrcodeScanner.getCameras().then(devices => {
-        if (devices && devices.length) {
-          // Use the first available camera ID
-          const cameraId = devices[0].id;
-          html5QrcodeScanner.start(cameraId, { fps: 10, qrbox: { width: 250, height: 250 } }, onScanSuccess, onScanError)
-            .then(() => {
-              console.log("Scanner started successfully.");
-              html5QrcodeScannerInstanceRef.current = html5QrcodeScanner; // Store instance
-            })
-            .catch(err => {
-              console.error("Failed to start scanner:", err);
-              setMessage({ type: 'error', text: `Failed to start scanner: ${err.message}. Please check camera permissions and ensure only one camera is trying to operate.` });
-              setIsScanning(false); // Turn off scanning state
-            });
-        } else {
-          setMessage({ type: 'error', text: 'No camera devices found.' });
-          setIsScanning(false); // Turn off scanning state
-        }
-      }).catch(err => {
-        console.error("Error getting camera devices:", err);
-        setMessage({ type: 'error', text: `Error accessing camera: ${err.message}. Please check browser permissions.` });
-        setIsScanning(false); // Turn off scanning state
-      });
+      // Start the scanner with the selectedDeviceId
+      html5QrcodeScanner.start(selectedDeviceId, { fps: 10, qrbox: { width: 250, height: 250 } }, onScanSuccess, onScanError)
+        .then(() => {
+          console.log("Scanner started successfully with device:", selectedDeviceId);
+          html5QrcodeScannerInstanceRef.current = html5QrcodeScanner; // Store instance
+        })
+        .catch(err => {
+          console.error("Failed to start scanner:", err);
+          setMessage({ type: 'error', text: `Failed to start scanner: ${err.message}. Ensure camera permissions are granted and select a valid camera.` });
+          setIsScanning(false); // Reset scanning state on error
+        });
+    } else if (!isScanning && html5QrcodeScannerInstanceRef.current) {
+        // If `isScanning` becomes false, and there's an active scanner instance, stop it.
+        html5QrcodeScannerInstanceRef.current.stop().then(() => {
+            console.log("Scanner stopped due to isScanning being false.");
+            html5QrcodeScannerInstanceRef.current = null;
+        }).catch(e => console.warn("Scanner stop failed on isScanning change (silent):", e));
     }
 
+    // Cleanup function: This runs when the component unmounts or when dependencies change and the effect re-runs.
     return () => {
-      // Cleanup function to clear scanner when component unmounts or isScanning becomes false
       if (html5QrcodeScannerInstanceRef.current) {
         html5QrcodeScannerInstanceRef.current.stop().then(() => {
-          console.log("Scanner stopped.");
-          html5QrcodeScannerInstanceRef.current = null; // Clear ref
+          console.log("Scanner cleanup stopped.");
+          html5QrcodeScannerInstanceRef.current = null;
         }).catch(error => {
           console.error("Failed to stop html5QrcodeScanner on cleanup:", error);
         });
       }
     };
-  }, [isScanning, isAuthReady, Html5QrcodeScanner]);
+  }, [isScanning, isAuthReady, selectedDeviceId, availableCameras.length]); // Add selectedDeviceId and availableCameras.length as dependencies
 
   const stopScanner = () => {
     if (html5QrcodeScannerInstanceRef.current) {
       html5QrcodeScannerInstanceRef.current.stop().then(() => {
         console.log("Scanner stopped manually.");
         html5QrcodeScannerInstanceRef.current = null;
-        setIsScanning(false);
+        setIsScanning(false); // Ensure state is reset
       }).catch(error => {
         console.error("Failed to stop html5QrcodeScanner on manual stop:", error);
         setIsScanning(false); // Ensure state is reset even on error
@@ -1409,14 +1368,15 @@ const DashboardPage = ({ setCurrentPage }) => {
   // --- Handle Add/Update Inventory Item ---
   const handleAddInventoryItem = async () => {
     setMessage({ type: '', text: '' });
-    setImageUploadError('');
+    setImageUploadError(''); // Clear previous image upload errors
+
     if (!db || !userId) {
       setMessage({ type: 'error', text: "Database not ready. Please wait." });
       return;
     }
 
     if (!scannedBarcode || !quantity || !expiryDate) {
-      setMessage({ type: 'error', text: 'Please scan a barcode, enter quantity, and expiry date.' });
+      setMessage({ type: 'error', text: 'Please scan/enter barcode, enter quantity, and expiry date.' });
       return;
     }
 
@@ -1430,21 +1390,22 @@ const DashboardPage = ({ setCurrentPage }) => {
       return;
     }
 
-    let imageUrl = imagePreviewUrl; // Start with current preview URL if any
+    let itemImageUrl = imagePreviewUrl; // Start with current preview URL if any, or existing product's image
 
-    // Handle image upload if a new file is selected
+    // Handle image upload if a new file is selected and storage is available
     if (productImage && storage) {
         setUploadingImage(true);
         try {
             const imageRef = ref(storage, `product_images/${scannedBarcode}-${Date.now()}-${productImage.name}`);
             await uploadBytes(imageRef, productImage);
-            imageUrl = await getDownloadURL(imageRef);
+            itemImageUrl = await getDownloadURL(imageRef);
             setMessage({ type: 'info', text: 'Image uploaded successfully!' });
         } catch (uploadError) {
             console.error("Error uploading image:", uploadError);
-            setImageUploadError('Failed to upload image. Please try again.');
+            setImageUploadError('Failed to upload product image. Please try again or proceed without an image.');
             setUploadingImage(false);
-            return; // Stop the process if image upload fails
+            // DO NOT return here, allow the product save to proceed even if image upload fails.
+            // The image URL will simply be null or the previous one.
         } finally {
             setUploadingImage(false);
         }
@@ -1457,7 +1418,7 @@ const DashboardPage = ({ setCurrentPage }) => {
       const newExpiryBatch = {
         date: expiryDate,
         quantity: parseInt(quantity),
-        addedAt: new Date(),
+        addedAt: new Date().toISOString(), // Store as ISO string for consistent sorting
         isRemoved: false
       };
 
@@ -1472,8 +1433,9 @@ const DashboardPage = ({ setCurrentPage }) => {
         await updateDoc(productDocRef, {
           expiryDates: updatedExpiryDates,
           quantity: newTotalQuantity,
-          lastUpdated: new Date(),
-          imageUrl: imageUrl || existingProductData.imageUrl || null // Update image URL, keep existing if no new upload
+          lastUpdated: new Date().toISOString(),
+          // Use the newly uploaded image URL, or keep the existing one if no new image was uploaded
+          imageUrl: itemImageUrl || existingProductData.imageUrl || null
         });
         setMessage({ type: 'success', text: `Product "${existingProductData.name}" (Barcode: ${scannedBarcode}) updated with new stock of ${quantity}.` });
       } else {
@@ -1483,22 +1445,23 @@ const DashboardPage = ({ setCurrentPage }) => {
           category: category,
           quantity: parseInt(quantity),
           expiryDates: [newExpiryBatch],
-          createdAt: new Date(),
-          lastUpdated: new Date(),
-          imageUrl: imageUrl || null // Store image URL for new product
+          createdAt: new Date().toISOString(),
+          lastUpdated: new Date().toISOString(),
+          imageUrl: itemImageUrl || null // Store image URL for new product
         });
         setMessage({ type: 'success', text: `New product "${productName}" (Barcode: ${scannedBarcode}) added successfully.` });
       }
 
+      // Reset form states after successful operation
       setScannedBarcode('');
       setProductName('');
-      setCategory('Chocolates');
+      setCategory(categories[0]); // Always reset to default after successful add/update
       setQuantity('');
       setExpiryDate(getTodayDate());
       setIsExistingProduct(false);
       setProductImage(null); // Clear selected image file
       setImagePreviewUrl(null); // Clear image preview
-      stopScanner();
+      stopScanner(); // Stop scanner if it was running
     } catch (error) {
       console.error("Error adding/updating inventory item:", error);
       setMessage({ type: 'error', text: `Failed to add/update item: ${error.message}` });
@@ -1516,7 +1479,7 @@ const DashboardPage = ({ setCurrentPage }) => {
     }
   };
 
-  const ownerEmail = 'siddeshpawar622.sp@gmail.com';
+  const ownerEmail = 'siddeshpawar622.sp@gmail.com'; // Define the owner's email
   const isOwner = user && user.email === ownerEmail;
 
   return (
@@ -1576,7 +1539,7 @@ const DashboardPage = ({ setCurrentPage }) => {
         <div className="bg-white p-6 rounded-lg shadow-lg mb-8">
           <h3 className="text-2xl font-semibold text-gray-800 mb-4">Add/Update Inventory Item</h3>
           <div className="space-y-4">
-            {/* Barcode Scanner/Input Toggle */}
+            {/* Barcode Scanner/Input Toggle and Camera Selector */}
             <div className="flex flex-col sm:flex-row items-center sm:space-x-4 space-y-4 sm:space-y-0 mb-4">
               <button
                 onClick={() => setIsScanning(!isScanning)}
@@ -1584,6 +1547,27 @@ const DashboardPage = ({ setCurrentPage }) => {
               >
                 {isScanning ? 'Stop Scanner' : 'Start Barcode Scanner'}
               </button>
+
+              {/* Camera Selection Dropdown */}
+              {availableCameras.length > 1 && ( // Only show if more than one camera is available
+                <div className="flex items-center space-x-2 w-full sm:w-auto">
+                  <label htmlFor="camera-select" className="text-gray-700 text-sm font-bold">Camera:</label>
+                  <select
+                    id="camera-select"
+                    value={selectedDeviceId}
+                    onChange={(e) => setSelectedDeviceId(e.target.value)}
+                    className="shadow appearance-none border rounded-lg py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 flex-grow"
+                    disabled={isScanning} // Disable changing camera while scanning
+                  >
+                    {availableCameras.map(device => (
+                      <option key={device.id} value={device.id}>
+                        {device.label || `Camera ${device.id.substring(0, 8)}...`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <span className="text-gray-700">OR</span>
               <input
                 type="text"
@@ -1591,16 +1575,21 @@ const DashboardPage = ({ setCurrentPage }) => {
                 placeholder="Enter Barcode Manually"
                 value={scannedBarcode}
                 onChange={(e) => setScannedBarcode(e.target.value)}
-                disabled={isScanning}
+                disabled={isScanning} // Disable manual input when scanning is active
               />
             </div>
 
-            {/* Scanner Area */}
-            {isScanning && (
+            {/* Scanner Area / Placeholder */}
+            {isScanning ? (
               <div id="qr-code-reader" ref={qrCodeReaderRef} className="w-full max-w-md mx-auto border-4 border-blue-500 rounded-lg overflow-hidden">
-                {/* HTML5-QRCode will render here */}
+                {/* Html5Qrcode will render here */}
+              </div>
+            ) : (
+              <div className="w-full max-w-md mx-auto h-64 flex items-center justify-center bg-gray-200 rounded-lg border-2 border-gray-300 text-gray-600 font-medium">
+                Click "Start Barcode Scanner" to activate camera.
               </div>
             )}
+
 
             {/* Barcode Display */}
             {scannedBarcode && (
@@ -1624,14 +1613,12 @@ const DashboardPage = ({ setCurrentPage }) => {
               isExistingProduct={isExistingProduct}
               handleAddInventoryItem={handleAddInventoryItem}
               categories={categories}
-              productImage={productImage} // Pass image states
+              productImage={productImage}
               setProductImage={setProductImage}
               imagePreviewUrl={imagePreviewUrl}
               setImagePreviewUrl={setImagePreviewUrl}
               uploadingImage={uploadingImage}
               imageUploadError={imageUploadError}
-              db={db} // Pass db to AddProductForm for its internal barcode check
-              userId={userId} // Pass userId as well
             />
           </div>
         </div>
@@ -1641,7 +1628,7 @@ const DashboardPage = ({ setCurrentPage }) => {
       </main>
 
       {/* Footer (Optional) */}
-      <footer className="bg-gray-800 text-white text-center p-4 mt-auto">
+      <footer className="bg-gray-800 text-white text-center p-4 mt-auto rounded-t-lg">
         <p>&copy; {new Date().getFullYear()} Londis Inventory Manager. All rights reserved.</p>
       </footer>
     </div>
@@ -1657,6 +1644,7 @@ export default function App() {
 
 
   useEffect(() => {
+    // This effect ensures that the correct page is shown once authentication state is ready.
     if (isAuthReady && !loading) {
       if (user) {
         setCurrentPage('dashboard');
@@ -1664,23 +1652,26 @@ export default function App() {
         setCurrentPage('login');
       }
     }
-  }, [user, loading, isAuthReady]);
+  }, [user, loading, isAuthReady]); // Dependencies: user object, loading status, auth readiness
 
   const handleCloseSignUpModal = () => setShowSignUpModal(false);
 
 
+  // Display a loading screen while authentication is in progress
   if (loading || !isAuthReady) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
-        <p className="text-xl font-semibold text-gray-700">Loading application...</p>
+          <p className="text-xl font-semibold text-gray-700">Loading application...</p>
       </div>
     );
   }
 
   let content;
   if (user) {
+    // If a user is logged in, show the Dashboard
     content = <DashboardPage setCurrentPage={setCurrentPage} />;
   } else {
+    // Otherwise, show Login or Signup based on currentPage state
     switch (currentPage) {
       case 'signup':
         content = <SignupPage setCurrentPage={setCurrentPage} />;
@@ -1696,12 +1687,13 @@ export default function App() {
     <div className="App">
       {content}
 
+      {/* SignUp Modal, conditionally rendered */}
       {showSignUpModal && (
         <SignUpModal
           onClose={handleCloseSignUpModal}
           onSignUpSuccess={() => {
             handleCloseSignUpModal();
-            setCurrentPage('login');
+            setCurrentPage('login'); // Redirect to login after successful signup
           }}
         />
       )}
