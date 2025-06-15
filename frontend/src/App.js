@@ -67,6 +67,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState(null);
+  const [employeeId, setEmployeeId] = useState(null); // New state for employee ID
   const [isAuthReady, setIsAuthReady] = useState(false);
 
   useEffect(() => {
@@ -82,9 +83,26 @@ export const AuthProvider = ({ children }) => {
         setUser(currentUser);
         setUserId(currentUser.uid);
         console.log("User authenticated:", currentUser.uid);
+
+        // Fetch user details to get employeeId
+        try {
+          const userDocRef = doc(dbInstance, `artifacts/${appId}/users/${currentUser.uid}/user_details`, currentUser.uid);
+          const docSnap = await getDoc(userDocRef);
+          if (docSnap.exists()) {
+            setEmployeeId(docSnap.data().employeeId || null);
+          } else {
+            setEmployeeId(null); // No employee ID found
+            console.warn("No user details found for:", currentUser.uid);
+          }
+        } catch (error) {
+          console.error("Error fetching employee ID:", error);
+          setEmployeeId(null);
+        }
+
       } else {
         setUser(null);
         setUserId(null);
+        setEmployeeId(null); // Clear employee ID on logout
         console.log("User not authenticated.");
       }
       setLoading(false);
@@ -118,7 +136,7 @@ export const AuthProvider = ({ children }) => {
     return () => unsubscribe();
   }, [isAuthReady]);
 
-  const value = { user, userId, loading, isAuthReady, auth: authInstance, db: dbInstance, storage: storageInstance };
+  const value = { user, userId, employeeId, loading, isAuthReady, auth: authInstance, db: dbInstance, storage: storageInstance };
 
   return (
     <AuthContext.Provider value={value}>
@@ -430,7 +448,7 @@ const AddProductForm = ({
     <div className="bg-white p-6 rounded-lg shadow-lg mb-8">
       <h3 className="text-2xl font-semibold text-gray-800 mb-4">{isExistingProduct ? 'Update Product Stock' : 'Add New Product'}</h3>
       <MessageBox message={localMessage} type={localMessageType} onClose={() => { setLocalMessage(''); setLocalMessageType(''); }} />
-      {imageUploadError && <MessageBox message={imageUploadError} type="error" onClose={() => { }} />} {/* Display image upload error */}
+      {imageUploadError && <MessageBox message={imageUploadError} type="error" onClose={() => { }} />} /* Display image upload error */
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -534,12 +552,21 @@ const AddProductForm = ({
 }
 
 // --- ProductList Component ---
-const ProductList = ({ db, userId }) => {
+const ProductList = ({ db, userId, employeeId }) => { // Added employeeId prop
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [updateMessage, setUpdateMessage] = useState({ type: '', text: '' });
-  const [searchTerm, setSearchTerm] = useState(''); // New state for search term
+
+  // Filter and Sort States
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterCategory, setFilterCategory] = useState('All');
+  const [filterExpiryStatus, setFilterExpiryStatus] = useState('All'); // 'All', 'Expired', 'Expiring Soon', 'Not Expired'
+  const [sortBy, setSortBy] = useState('name_asc'); // 'name_asc', 'name_desc', 'expiry_asc', 'expiry_desc'
+
+  // Categories for product dropdown - Memoized to prevent unnecessary re-renders
+  const categories = useMemo(() => ['All', 'Chocolates', 'Alcohol', 'Wines', 'Cigarettes', 'Soft Drinks', 'Crisps', 'Other'], []);
+
 
   useEffect(() => {
     if (!db || !userId) {
@@ -548,8 +575,6 @@ const ProductList = ({ db, userId }) => {
     }
 
     const productsCollectionRef = collection(db, 'products');
-    // NOTE: orderBy() is removed as per previous instructions to avoid index issues.
-    // Sorting will be done in-memory.
     const q = query(productsCollectionRef);
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -557,13 +582,7 @@ const ProductList = ({ db, userId }) => {
         id: doc.id,
         ...doc.data()
       }));
-      // Sort products by name and then their expiry dates in memory
-      const sortedProducts = productsData.map(product => ({
-        ...product,
-        expiryDates: product.expiryDates ? product.expiryDates.sort((a, b) => moment(a.date).diff(moment(b.date))) : []
-      })).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
-      setProducts(sortedProducts);
+      setProducts(productsData);
       setLoading(false);
     }, (err) => {
       console.error("Error fetching products:", err);
@@ -594,7 +613,7 @@ const ProductList = ({ db, userId }) => {
       // Create a deep copy of the expiryDates array to avoid direct mutation
       const updatedExpiryDates = productToUpdate.expiryDates.map((batch, idx) => {
         if (idx === expiryDateIndex) {
-          return { ...batch, isRemoved: true }; // Mark as removed
+          return { ...batch, isRemoved: true, removedBy: employeeId }; // Mark as removed and add removedBy (employeeId)
         }
         return batch;
       });
@@ -618,11 +637,87 @@ const ProductList = ({ db, userId }) => {
     }
   };
 
-  // Filtered products based on search term
-  const filteredProducts = products.filter(product =>
-    product.barcode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // --- Filtering Logic ---
+  const filteredProducts = useMemo(() => {
+    let currentProducts = [...products];
+
+    // 1. Search Term Filter (Name or Barcode)
+    if (searchTerm) {
+      const lowerCaseSearchTerm = searchTerm.toLowerCase();
+      currentProducts = currentProducts.filter(product =>
+        (product.name || '').toLowerCase().includes(lowerCaseSearchTerm) ||
+        (product.barcode || '').toLowerCase().includes(lowerCaseSearchTerm)
+      );
+    }
+
+    // 2. Category Filter
+    if (filterCategory !== 'All') {
+      currentProducts = currentProducts.filter(product => product.category === filterCategory);
+    }
+
+    // 3. Expiry Status Filter
+    if (filterExpiryStatus !== 'All') {
+      const today = moment().startOf('day');
+      currentProducts = currentProducts.filter(product => {
+        // Only consider active (non-removed) batches for expiry status
+        const activeBatches = (product.expiryDates || []).filter(batch => !batch.isRemoved);
+
+        if (filterExpiryStatus === 'Expired') {
+          return activeBatches.some(batch => moment(batch.date).isBefore(today));
+        } else if (filterExpiryStatus === 'Expiring Soon') {
+          return activeBatches.some(batch => {
+            const expiry = moment(batch.date);
+            const daysDiff = expiry.diff(today, 'days');
+            return daysDiff >= 0 && daysDiff <= 7; // Expires today or within 7 days
+          });
+        } else if (filterExpiryStatus === 'Not Expired') {
+          // A product is "Not Expired" if it has at least one active batch
+          // and ALL its active batches are not expired and not expiring soon.
+          // Or, more simply, if it has at least one batch with a future expiry date beyond 7 days.
+          return activeBatches.some(batch => moment(batch.date).isAfter(today.clone().add(7, 'days')));
+        }
+        return true; // Should not reach here if filterExpiryStatus is handled
+      });
+    }
+
+    // 4. Sort Logic
+    currentProducts.sort((a, b) => {
+      const nameA = (a.name || '').toLowerCase();
+      const nameB = (b.name || '').toLowerCase();
+
+      // Helper to get the earliest active expiry date for a product
+      const getEarliestExpiry = (product) => {
+        const activeBatches = (product.expiryDates || []).filter(batch => !batch.isRemoved);
+        if (activeBatches.length === 0) return moment().add(100, 'years'); // Very distant future for products with no active batches
+        return moment.min(activeBatches.map(batch => moment(batch.date)));
+      };
+
+      const expiryA = getEarliestExpiry(a);
+      const expiryB = getEarliestExpiry(b);
+
+      switch (sortBy) {
+        case 'name_asc':
+          return nameA.localeCompare(nameB);
+        case 'name_desc':
+          return nameB.localeCompare(nameA);
+        case 'expiry_asc':
+          return expiryA.diff(expiryB);
+        case 'expiry_desc':
+          return expiryB.diff(expiryA);
+        default:
+          return 0;
+      }
+    });
+
+    return currentProducts;
+  }, [products, searchTerm, filterCategory, filterExpiryStatus, sortBy]);
+
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setFilterCategory('All');
+    setFilterExpiryStatus('All');
+    setSortBy('name_asc');
+  };
 
 
   const styles = {
@@ -752,57 +847,145 @@ const ProductList = ({ db, userId }) => {
       {error && <MessageBox message={error} type="error" onClose={() => setError('')} />}
       {updateMessage.text && <MessageBox message={updateMessage.text} type={updateMessage.type} onClose={() => setUpdateMessage({ type: '', text: '' })} />}
 
-      {/* Search Input for Product List */}
-      <div className="mb-4">
-        <input
-          type="text"
-          placeholder="Search by barcode or name..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full"
-        />
+      {/* Filter and Sort Controls */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 items-end">
+        {/* Search Input */}
+        <div>
+          <label htmlFor="search-term" className="block text-gray-700 text-sm font-bold mb-2">Search Name/Barcode:</label>
+          <input
+            type="text"
+            id="search-term"
+            placeholder="Search..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full"
+          />
+        </div>
+
+        {/* Category Filter */}
+        <div>
+          <label htmlFor="filter-category" className="block text-gray-700 text-sm font-bold mb-2">Filter by Category:</label>
+          <select
+            id="filter-category"
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+            className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full bg-white"
+          >
+            {categories.map((cat) => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Expiry Status Filter */}
+        <div>
+          <label htmlFor="filter-expiry" className="block text-gray-700 text-sm font-bold mb-2">Filter by Expiry Status:</label>
+          <select
+            id="filter-expiry"
+            value={filterExpiryStatus}
+            onChange={(e) => setFilterExpiryStatus(e.target.value)}
+            className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full bg-white"
+          >
+            <option value="All">All</option>
+            <option value="Expired">Expired</option>
+            <option value="Expiring Soon">Expiring Soon (7 days)</option>
+            <option value="Not Expired">Not Expired</option>
+          </select>
+        </div>
+
+        {/* Sort By */}
+        <div>
+          <label htmlFor="sort-by" className="block text-gray-700 text-sm font-bold mb-2">Sort By:</label>
+          <select
+            id="sort-by"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full bg-white"
+          >
+            <option value="name_asc">Product Name (A-Z)</option>
+            <option value="name_desc">Product Name (Z-A)</option>
+            <option value="expiry_asc">Earliest Expiry Date (Asc)</option>
+            <option value="expiry_desc">Earliest Expiry Date (Desc)</option>
+          </select>
+        </div>
+
+        {/* Clear Filters Button */}
+        <div className="col-span-1 md:col-span-2 lg:col-span-4 flex justify-end">
+          <button
+            onClick={handleClearFilters}
+            className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-50 transition duration-300 ease-in-out"
+          >
+            Clear Filters & Sort
+          </button>
+        </div>
       </div>
 
       {!loading && !error && filteredProducts.length === 0 && (
-        <p className="text-center text-gray-600">No products found matching your search. Add some using the "Add Product" section.</p>
+        <p className="text-center text-gray-600">No products found matching your criteria. Try adjusting your filters.</p>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {!loading && !error && filteredProducts.map(product => (
-          <div key={product.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50 shadow-sm">
-            <div className="flex items-center mb-3">
-                {product.imageUrl && (
-                    <img src={product.imageUrl} alt={product.name} className="w-20 h-20 object-cover rounded-md mr-4 border border-gray-200" onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/80x80/cccccc/000000?text=No+Image'; }} />
-                )}
-                <h3 className="text-xl font-semibold text-gray-900">{product.name} <span className="text-gray-500 text-base">({product.barcode})</span></h3>
-            </div>
-            <p className="text-gray-700 mb-2">Category: {product.category || 'N/A'}</p>
-            <p className="text-gray-700 font-bold mb-3">Total Quantity: {product.quantity || 0}</p>
-            <h4 className="font-medium text-gray-800 mb-2">Expiry Batches:</h4>
-            <ul className="list-none p-0 m-0">
-              {product.expiryDates && product.expiryDates.length > 0 ? (
-                product.expiryDates.map((expiry, index) => (
-                  <li key={index} style={{ ...styles.expiryItem, ...getExpiryItemStyle(expiry.date, expiry.isRemoved) }}>
-                    <span className="font-semibold">
-                      {expiry.isRemoved ? 'Removed' : `Expiry: ${moment(expiry.date).format('DD/MM/YYYY')}`}
-                      {expiry.isRemoved ? '' : ` (Qty: ${expiry.quantity || 'N/A'})`}
-                    </span>
-                    {!expiry.isRemoved && (
+        {!loading && !error && filteredProducts.map(product => {
+          // Separate active and removed batches for display
+          const activeBatches = (product.expiryDates || []).filter(batch => !batch.isRemoved);
+          const removedBatches = (product.expiryDates || [])
+            .filter(batch => batch.isRemoved)
+            .sort((a, b) => moment(b.addedAt).diff(moment(a.addedAt))); // Sort by most recent removal first
+
+          // Display up to the latest 3 removed batches
+          const displayRemovedBatches = removedBatches.slice(0, 3);
+          const moreRemovedCount = removedBatches.length - displayRemovedBatches.length;
+
+          return (
+            <div key={product.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50 shadow-sm">
+              <div className="flex items-center mb-3">
+                  {product.imageUrl && (
+                      <img src={product.imageUrl} alt={product.name} className="w-20 h-20 object-cover rounded-md mr-4 border border-gray-200" onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/80x80/cccccc/000000?text=No+Image'; }} />
+                  )}
+                  <h3 className="text-xl font-semibold text-gray-900">{product.name} <span className="text-gray-500 text-base">({product.barcode})</span></h3>
+              </div>
+              <p className="text-gray-700 mb-2">Category: {product.category || 'N/A'}</p>
+              <p className="text-700 font-bold mb-3">Total Quantity: {product.quantity || 0}</p>
+              <h4 className="font-medium text-gray-800 mb-2">Expiry Batches:</h4>
+              <ul className="list-none p-0 m-0">
+                {activeBatches.length > 0 ? (
+                  activeBatches.sort((a, b) => moment(a.date).diff(moment(b.date))).map((expiry, index) => ( // Sort active batches by date
+                    <li key={index} style={{ ...styles.expiryItem, ...getExpiryItemStyle(expiry.date, expiry.isRemoved) }}>
+                      <span className="font-semibold">
+                        Expiry: {moment(expiry.date).format('DD/MM/YYYY')} (Qty: {expiry.quantity || 'N/A'})
+                        {expiry.addedBy && <span className="text-gray-500 text-xs ml-2"> (Added by: {expiry.addedBy})</span>}
+                      </span>
                       <button
-                        onClick={() => handleMarkAsRemoved(product.id, index)}
+                        onClick={() => handleMarkAsRemoved(product.id, product.expiryDates.indexOf(expiry))} // Pass original index
                         className="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-1.5 px-3 rounded-md text-sm transition duration-200"
                       >
                         Mark as Removed
                       </button>
-                    )}
+                    </li>
+                  ))
+                ) : (
+                  <li className="text-gray-600">No active expiry batches.</li>
+                )}
+
+                {/* Display removed batches */}
+                {displayRemovedBatches.map((expiry, index) => (
+                  <li key={`removed-${index}`} style={{ ...styles.expiryItem, ...styles.removedItem }}>
+                    <span className="font-semibold line-through">
+                      Expiry: {moment(expiry.date).format('DD/MM/YYYY')} (Qty: {expiry.quantity || 'N/A'})
+                    </span>
+                    {expiry.removedBy && <span className="text-gray-500 text-xs ml-2"> (Removed by: {expiry.removedBy})</span>}
                   </li>
-                ))
-              ) : (
-                <li className="text-gray-600">No expiry batches recorded.</li>
-              )}
-            </ul>
-          </div>
-        ))}
+                ))}
+                {moreRemovedCount > 0 && (
+                  <li className="text-gray-600 text-sm mt-1">
+                    ...and {moreRemovedCount} more removed {moreRemovedCount === 1 ? 'batch' : 'batches'}.
+                  </li>
+                )}
+
+              </ul>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1109,7 +1292,7 @@ const LoginPage = ({ setCurrentPage }) => {
 
 // --- Dashboard Page Component ---
 const DashboardPage = ({ setCurrentPage }) => {
-  const { user, userId, auth, db, storage, isAuthReady } = useAuth();
+  const { user, userId, employeeId, auth, db, storage, isAuthReady } = useAuth(); // Added employeeId
   const [userDetails, setUserDetails] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' }); // Unified message state
   const [appMessage, setAppMessage] = useState(''); // State for global announcements
@@ -1141,7 +1324,7 @@ const DashboardPage = ({ setCurrentPage }) => {
   // Categories for product dropdown - Memoized to prevent unnecessary re-renders of useEffect
   const categories = useMemo(() => ['Chocolates', 'Alcohol', 'Wines', 'Cigarettes', 'Soft Drinks', 'Crisps', 'Other'], []);
 
-  // Utility to get current date as YYYY-MM-DD
+  // Utility to get current date as ഉൾപ്പെടുത്തി-MM-DD
   const getTodayDate = useCallback(() => {
     if (moment) {
         return moment().format('YYYY-MM-DD');
@@ -1370,8 +1553,8 @@ const DashboardPage = ({ setCurrentPage }) => {
     setMessage({ type: '', text: '' });
     setImageUploadError(''); // Clear previous image upload errors
 
-    if (!db || !userId) {
-      setMessage({ type: 'error', text: "Database not ready. Please wait." });
+    if (!db || !userId || !employeeId) { // Ensure employeeId is available
+      setMessage({ type: 'error', text: "Database or employee ID not ready. Please wait." });
       return;
     }
 
@@ -1419,6 +1602,7 @@ const DashboardPage = ({ setCurrentPage }) => {
         date: expiryDate,
         quantity: parseInt(quantity),
         addedAt: new Date().toISOString(), // Store as ISO string for consistent sorting
+        addedBy: employeeId, // Store the employee ID who added this batch
         isRemoved: false
       };
 
@@ -1549,7 +1733,7 @@ const DashboardPage = ({ setCurrentPage }) => {
               </button>
 
               {/* Camera Selection Dropdown */}
-              {availableCameras.length > 1 && ( // Only show if more than one camera is available
+              {availableCameras.length > 0 && ( // Show even if only one camera, for consistency
                 <div className="flex items-center space-x-2 w-full sm:w-auto">
                   <label htmlFor="camera-select" className="text-gray-700 text-sm font-bold">Camera:</label>
                   <select
@@ -1567,6 +1751,9 @@ const DashboardPage = ({ setCurrentPage }) => {
                   </select>
                 </div>
               )}
+                {availableCameras.length === 0 && !isScanning && (
+                    <span className="text-red-500 text-sm">No cameras found.</span>
+                )}
 
               <span className="text-gray-700">OR</span>
               <input
@@ -1624,7 +1811,7 @@ const DashboardPage = ({ setCurrentPage }) => {
         </div>
 
         {/* Existing Inventory Overview Section */}
-        <ProductList db={db} userId={userId} />
+        <ProductList db={db} userId={userId} employeeId={employeeId} /> {/* Pass employeeId */}
       </main>
 
       {/* Footer (Optional) */}
