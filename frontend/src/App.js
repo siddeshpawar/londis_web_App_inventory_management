@@ -1880,7 +1880,7 @@ export default function App() {
           onClose={handleCloseSignUpModal}
           onSignUpSuccess={() => {
             handleCloseSignUpModal();
-            setCurrentPage('login'); // Redirect to login after successful signup
+            setCurrentPage('login'); // rRedirect to login after successful signup
           }}
         />
       )}
