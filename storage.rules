@@ -1,15 +1,15 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // This rule allows any authenticated user to read and write files
-    // in the 'product_images' folder within your Storage bucket.
-    // This is required for the image upload functionality to work.
-    match /product_images/{allPaths=**} {
-      allow read, write: if request.auth != null;
+    // Allow read access to all users for product images
+    match /product_images/{imageId} {
+      allow read: if true;
+
+      // Allow write access only to authenticated users
+      allow write: if request.auth != null;
     }
 
-    // This is a general rule that denies access to all other paths
-    // in your Storage bucket by default, unless explicitly allowed above.
+    // Default deny all other access
     match /{allPaths=**} {
       allow read, write: if false;
     }

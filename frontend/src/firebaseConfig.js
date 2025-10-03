@@ -5,11 +5,12 @@ import { getFirestore } from 'firebase/firestore'; // Import getFirestore
 import { getAuth } from 'firebase/auth';
 import { getFunctions } from 'firebase/functions';
 
+
 const firebaseConfig = {
   apiKey: "AIzaSyCVwde47xofIaRyJQr5QjeDgKCinQ7s8_U",
   authDomain: "londisinventoryapp.firebaseapp.com",
   projectId: "londisinventoryapp",
-  storageBucket: "londisinventoryapp.firebasestorage.app",
+  storageBucket: "londisinventoryapp.appspot.com", // Updated storage bucket URL - was .firebasestorage.app, now correct format
   messagingSenderId: "990186016538",
   appId: "1:990186016538:web:e69f834cb120e62e5966a3"
 };
@@ -21,7 +22,4 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);      // For Firebase Authentication
 export const db = getFirestore(app);   // For Firestore database
 export const functions = getFunctions(app); // For Cloud Functions
-
-// You can optionally export the app instance if needed elsewhere,
-// but named exports for services are generally preferred.
-// export default app;
+export const storage = getStorage(app); // Add this export for Firebase Storage

@@ -19,10 +19,10 @@ import {
   onSnapshot,
   updateDoc,
 } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+
 import Tesseract from 'tesseract.js';
 
-// Access Html5Qrcode and moment directly from window as they are loaded via CDN
+
 const Html5Qrcode = typeof window !== 'undefined' ? window.Html5Qrcode : null;
 const moment = typeof window !== 'undefined' ? window.moment : null;
 
@@ -35,7 +35,7 @@ const firebaseConfig = {
     apiKey: "AIzaSyCVwde47xofIaRyJQr5QjeDgKCinQ7s8_U",
     authDomain: "londisinventoryapp.firebaseapp.com",
     projectId: "londisinventoryapp",
-    storageBucket: "londisinventoryapp.firebasestorage.app",
+    storageBucket: "londisinventoryapp.appspot.com", // Updated storage bucket URL
     messagingSenderId: "990186016538",
     appId: "1:990186016538:web:e69f834cb120e62e5966a3"
 };
@@ -43,14 +43,14 @@ const firebaseConfig = {
 let firebaseAppInstance;
 let authInstance;
 let dbInstance;
-let storageInstance;
+// Remove local storage instance since we're importing it from firebaseConfig
 
 if (!firebaseAppInstance) {
   try {
     firebaseAppInstance = initializeApp(firebaseConfig);
     authInstance = getAuth(firebaseAppInstance);
     dbInstance = getFirestore(firebaseAppInstance);
-    storageInstance = getStorage(firebaseAppInstance);
+    // Removed local storage initialization - using imported storage instead
   } catch (error) {
     console.error("Firebase initialization error:", error);
   }
@@ -116,7 +116,7 @@ export const AuthProvider = ({ children }) => {
     return () => unsubscribe();
   }, [isAuthReady]);
 
-  const value = { user, userId, employeeId, loading, isAuthReady, auth: authInstance, db: dbInstance, storage: storageInstance };
+  const value = { user, userId, employeeId, loading, isAuthReady, auth: authInstance, db: dbInstance };
 
   return (
     <AuthContext.Provider value={value}>
@@ -158,8 +158,8 @@ const AddProductForm = ({
   isExistingProduct,
   handleAddInventoryItem,
   categories,
-  productImage,
-  setProductImage,
+  productImageData,
+  setProductImageData,
   imagePreviewUrl,
   setImagePreviewUrl,
   uploadingImage,
@@ -169,6 +169,7 @@ const AddProductForm = ({
   handleOcrFileChange, // <-- Handler for when a file is selected
   ocrOptions,
   setOcrOptions,
+  isExistingBarcode,
 }) => {
   const handleOcrOptionClick = (option) => {
     setProductName(prev => `${prev} ${option}`.trim());
@@ -176,10 +177,24 @@ const AddProductForm = ({
 
   const handleImageChange = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      setProductImage(file);
-      setImagePreviewUrl(URL.createObjectURL(file));
+    if (!file) {
+      setProductImageData(null);
+      setImagePreviewUrl(null);
+      return;
     }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Data = event.target.result;
+      setProductImageData(base64Data);
+      setImagePreviewUrl(base64Data);
+    };
+    reader.onerror = () => {
+      console.error('Failed to read image file.');
+      setProductImageData(null);
+      setImagePreviewUrl(null);
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -260,7 +275,7 @@ const AddProductForm = ({
         </div>
         <div>
             <label htmlFor="productImage" className="block text-gray-700 text-sm font-bold mb-2">Product Photo:</label>
-            <input type="file" id="productImage" accept="image/*" className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0" onChange={handleImageChange} disabled={uploadingImage} />
+            <input type="file" id="productImage" accept="image/*" className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0" onChange={handleImageChange} disabled={uploadingImage || isExistingBarcode} />
             {imagePreviewUrl && <img src={imagePreviewUrl} alt="Preview" className="mt-2 h-24 w-24 object-cover rounded-md border" />}
         </div>
         <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg w-full" disabled={uploadingImage}>
@@ -694,7 +709,7 @@ const LoginPage = ({ setCurrentPage }) => {
 // --- Main Pages ---
 
 const DashboardPage = ({ setCurrentPage }) => {
-  const { user, userId, employeeId, auth, db, storage, isAuthReady } = useAuth();
+  const { user, userId, employeeId, auth, db, isAuthReady } = useAuth();
   const [userDetails, setUserDetails] = useState(null);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [appMessage, setAppMessage] = useState('');
@@ -709,7 +724,7 @@ const DashboardPage = ({ setCurrentPage }) => {
   const [isExistingProduct, setIsExistingProduct] = useState(false);
   
   // New states for image upload
-  const [productImage, setProductImage] = useState(null);
+  const [productImageData, setProductImageData] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageUploadError, setImageUploadError] = useState('');
@@ -743,12 +758,15 @@ const DashboardPage = ({ setCurrentPage }) => {
           const data = docSnap.data();
           setProductName(data.name || '');
           setCategory(data.category || categories[0]);
-          setImagePreviewUrl(data.imageUrl || null);
+          const storedImage = data.imageUrl || null;
+          setImagePreviewUrl(storedImage);
+          setProductImageData(storedImage);
           setIsExistingProduct(true);
         } else {
           setProductName('');
           setCategory(categories[0]);
           setImagePreviewUrl(null);
+          setProductImageData(null);
           setIsExistingProduct(false);
         }
       }
@@ -844,16 +862,7 @@ const DashboardPage = ({ setCurrentPage }) => {
         return;
     }
     setUploadingImage(true);
-    let itemImageUrl = imagePreviewUrl;
-    if (productImage) {
-        const imageRef = ref(storage, `product_images/${scannedBarcode}-${Date.now()}`);
-        try {
-            await uploadBytes(imageRef, productImage);
-            itemImageUrl = await getDownloadURL(imageRef);
-        } catch (error) {
-            setImageUploadError('Image upload failed. Product saved without new image.');
-        }
-    }
+    let itemImageUrl = productImageData || imagePreviewUrl;
     setUploadingImage(false);
 
     const productDocRef = doc(db, 'products', scannedBarcode);
@@ -882,7 +891,7 @@ const DashboardPage = ({ setCurrentPage }) => {
             await setDoc(productDocRef, newProductData);
             setMessage({ type: 'success', text: `New product "${productName}" added.` });
         }
-        setScannedBarcode(''); setProductName(''); setCategory(categories[0]); setQuantity(''); setExpiryDate(getTodayDate()); setProductImage(null); setImagePreviewUrl(null); setOcrOptions([]);
+        setScannedBarcode(''); setProductName(''); setCategory(categories[0]); setQuantity(''); setExpiryDate(getTodayDate()); setProductImageData(null); setImagePreviewUrl(null); setOcrOptions([]);
     } catch (error) {
         setMessage({ type: 'error', text: 'Failed to save product.' });
     }
@@ -959,13 +968,14 @@ const DashboardPage = ({ setCurrentPage }) => {
             isExistingProduct={isExistingProduct}
             handleAddInventoryItem={handleAddInventoryItem}
             categories={categories}
-            productImage={productImage} setProductImage={setProductImage}
+            productImageData={productImageData} setProductImageData={setProductImageData}
             imagePreviewUrl={imagePreviewUrl} setImagePreviewUrl={setImagePreviewUrl}
             uploadingImage={uploadingImage} imageUploadError={imageUploadError}
             ocrInputRef={ocrInputRef}
             handleOcrFileChange={handleOcrFileChange}
             onScanNameClick={() => ocrInputRef.current.click()}
             ocrOptions={ocrOptions} setOcrOptions={setOcrOptions}
+            isExistingBarcode={isExistingProduct}
         />
         
         <ProductList db={db} userId={userId} employeeId={employeeId} />
