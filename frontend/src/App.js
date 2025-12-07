@@ -505,6 +505,21 @@ const ProductList = ({ db, userId, employeeId }) => {
   const [filterExpiryStatus, setFilterExpiryStatus] = useState('All');
   const [sortBy, setSortBy] = useState('name_asc');
   
+  // Add Inventory Modal states
+  const [showAddInventoryModal, setShowAddInventoryModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [addQuantity, setAddQuantity] = useState('');
+  const [addExpiryDate, setAddExpiryDate] = useState(moment ? moment().format('YYYY-MM-DD') : '');
+  
+  // Delete Product Modal states
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  
+  // Remove Batch Modal states
+  const [showRemoveBatchModal, setShowRemoveBatchModal] = useState(false);
+  const [removeBatchProduct, setRemoveBatchProduct] = useState(null);
+  const [removeBatchIndex, setRemoveBatchIndex] = useState(null);
+  
   // Barcode scanner states
   const [isSearchScanning, setIsSearchScanning] = useState(false);
   const [searchAvailableCameras, setSearchAvailableCameras] = useState([]);
@@ -539,7 +554,18 @@ const ProductList = ({ db, userId, employeeId }) => {
     return () => unsubscribe();
   }, [db, userId]);
 
-  const handleMarkAsRemoved = async (productId, expiryDateIndex) => {
+  const handleMarkAsRemoved = (productId, expiryDateIndex) => {
+    const product = products.find(p => p.id === productId);
+    if (product) {
+      setRemoveBatchProduct(product);
+      setRemoveBatchIndex(expiryDateIndex);
+      setShowRemoveBatchModal(true);
+    }
+  };
+
+  const confirmRemoveBatch = async () => {
+    if (!removeBatchProduct || removeBatchIndex === null) return;
+
     setUpdateMessage({ type: '', text: '' });
     setError('');
     if (!db) {
@@ -548,16 +574,10 @@ const ProductList = ({ db, userId, employeeId }) => {
     }
 
     try {
-      const productDocRef = doc(db, 'products', productId);
-      const productToUpdate = products.find(p => p.id === productId);
+      const productDocRef = doc(db, 'products', removeBatchProduct.id);
 
-      if (!productToUpdate) {
-        setError('Product not found for update.');
-        return;
-      }
-
-      const updatedExpiryDates = productToUpdate.expiryDates.map((batch, idx) => {
-        if (idx === expiryDateIndex) {
+      const updatedExpiryDates = removeBatchProduct.expiryDates.map((batch, idx) => {
+        if (idx === removeBatchIndex) {
           return { ...batch, isRemoved: true, removedBy: employeeId };
         }
         return batch;
@@ -574,6 +594,55 @@ const ProductList = ({ db, userId, employeeId }) => {
       });
 
       setUpdateMessage({ type: 'success', text: 'Item marked as removed successfully!' });
+      setShowRemoveBatchModal(false);
+      setRemoveBatchProduct(null);
+      setRemoveBatchIndex(null);
+      setTimeout(() => setUpdateMessage({ type: '', text: '' }), 3000);
+    } catch (err) {
+      console.error("Error marking item as removed:", err);
+      setError('Failed to mark item as removed. Please try again.');
+    }
+  };
+
+  const confirmRemoveAndAddNewBatch = async () => {
+    if (!removeBatchProduct || removeBatchIndex === null) return;
+
+    setUpdateMessage({ type: '', text: '' });
+    setError('');
+    if (!db) {
+      setError('Database not ready.');
+      return;
+    }
+
+    try {
+      const productDocRef = doc(db, 'products', removeBatchProduct.id);
+
+      const updatedExpiryDates = removeBatchProduct.expiryDates.map((batch, idx) => {
+        if (idx === removeBatchIndex) {
+          return { ...batch, isRemoved: true, removedBy: employeeId };
+        }
+        return batch;
+      });
+
+      const newTotalQuantity = updatedExpiryDates
+        .filter(batch => !batch.isRemoved)
+        .reduce((sum, batch) => sum + (batch.quantity || 0), 0);
+
+      await updateDoc(productDocRef, {
+        expiryDates: updatedExpiryDates,
+        quantity: newTotalQuantity,
+        lastUpdated: new Date()
+      });
+
+      setUpdateMessage({ type: 'success', text: 'Item marked as removed successfully!' });
+      
+      // Close remove modal and open add inventory modal
+      setShowRemoveBatchModal(false);
+      setSelectedProduct(removeBatchProduct);
+      setShowAddInventoryModal(true);
+      setRemoveBatchProduct(null);
+      setRemoveBatchIndex(null);
+      
       setTimeout(() => setUpdateMessage({ type: '', text: '' }), 3000);
     } catch (err) {
       console.error("Error marking item as removed:", err);
@@ -703,6 +772,79 @@ const ProductList = ({ db, userId, employeeId }) => {
     }
   }, [searchSelectedDeviceId]);
 
+  const handleAddInventory = async () => {
+    if (!selectedProduct || !addQuantity || !addExpiryDate) {
+      setUpdateMessage({ type: 'error', text: 'Please fill all fields' });
+      return;
+    }
+
+    try {
+      const productDocRef = doc(db, 'products', selectedProduct.id);
+      const docSnap = await getDoc(productDocRef);
+      
+      if (docSnap.exists()) {
+        const existingData = docSnap.data();
+        const newExpiryBatch = { 
+          date: addExpiryDate, 
+          quantity: parseInt(addQuantity), 
+          addedBy: employeeId, 
+          isRemoved: false 
+        };
+        
+        await updateDoc(productDocRef, {
+          expiryDates: [...(existingData.expiryDates || []), newExpiryBatch],
+          quantity: (existingData.quantity || 0) + parseInt(addQuantity),
+          lastUpdated: new Date().toISOString(),
+        });
+        
+        setUpdateMessage({ type: 'success', text: `Stock added to "${selectedProduct.name}"` });
+        
+        // Reset modal
+        setShowAddInventoryModal(false);
+        setSelectedProduct(null);
+        setAddQuantity('');
+        setAddExpiryDate(moment ? moment().format('YYYY-MM-DD') : '');
+        
+        // Clear success message after 3 seconds
+        setTimeout(() => {
+          setUpdateMessage({ type: '', text: '' });
+        }, 3000);
+      }
+    } catch (error) {
+      setUpdateMessage({ type: 'error', text: 'Failed to add inventory' });
+      console.error('Add inventory error:', error);
+    }
+  };
+
+  const handleDeleteProduct = async () => {
+    if (!selectedProduct) return;
+
+    // Input sanitization - only allow exact "delete" (case insensitive)
+    const sanitizedInput = deleteConfirmText.toLowerCase().trim();
+    if (sanitizedInput !== 'delete') {
+      setUpdateMessage({ type: 'error', text: 'Please type exactly "delete" to confirm' });
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'products', selectedProduct.id));
+      setUpdateMessage({ type: 'success', text: `"${selectedProduct.name}" completely removed from inventory` });
+      
+      // Reset modal
+      setShowDeleteModal(false);
+      setSelectedProduct(null);
+      setDeleteConfirmText('');
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        setUpdateMessage({ type: '', text: '' });
+      }, 3000);
+    } catch (error) {
+      setUpdateMessage({ type: 'error', text: 'Failed to remove product' });
+      console.error('Delete product error:', error);
+    }
+  };
+
   const getExpiryItemStyleClass = (expiryDate, isRemoved) => {
     if (isRemoved) return 'bg-gray-200 border-l-gray-400 text-gray-500 line-through';
     const today = moment();
@@ -790,9 +932,38 @@ const ProductList = ({ db, userId, employeeId }) => {
           const removedBatches = (product.expiryDates || []).filter(batch => batch.isRemoved);
           return (
             <div key={product.id} className="border border-gray-200 rounded-lg p-4 bg-gray-50 shadow-sm">
-              <div className="flex items-center mb-3">
-                {product.imageUrl && <img src={product.imageUrl} alt={product.name} className="w-20 h-20 object-cover rounded-md mr-4 border" onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/80x80/cccccc/000000?text=No+Image'; }} />}
-                <h3 className="text-xl font-semibold text-gray-900">{product.name} <span className="text-gray-500 text-base">({product.barcode})</span></h3>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center">
+                  {product.imageUrl && <img src={product.imageUrl} alt={product.name} className="w-20 h-20 object-cover rounded-md mr-4 border" onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/80x80/cccccc/000000?text=No+Image'; }} />}
+                  <h3 className="text-xl font-semibold text-gray-900">{product.name} <span className="text-gray-500 text-base">({product.barcode})</span></h3>
+                </div>
+                <div className="flex space-x-2">
+                  <button 
+                    onClick={() => {
+                      setSelectedProduct(product);
+                      setShowAddInventoryModal(true);
+                    }}
+                    className="bg-green-500 hover:bg-green-600 text-white rounded-full w-8 h-8 flex items-center justify-center"
+                    title="Add Inventory"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setSelectedProduct(product);
+                      setShowDeleteModal(true);
+                      setDeleteConfirmText('');
+                    }}
+                    className="bg-red-500 hover:bg-red-600 text-white rounded-full w-8 h-8 flex items-center justify-center"
+                    title="Delete Product"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
               </div>
               <p>Category: {product.category}</p>
               <p className="font-bold">Total Quantity: {product.quantity}</p>
@@ -814,6 +985,169 @@ const ProductList = ({ db, userId, employeeId }) => {
           )
         }) : <p className="text-center col-span-full text-gray-500">No products match your filters.</p>}
       </div>
+
+      {/* Add Inventory Modal */}
+      {showAddInventoryModal && selectedProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-semibold text-gray-800 mb-4">Add Inventory - {selectedProduct.name}</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="add-quantity" className="block text-gray-700 text-sm font-bold mb-2">Quantity:</label>
+                <input
+                  type="number"
+                  id="add-quantity"
+                  className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700"
+                  value={addQuantity}
+                  onChange={(e) => setAddQuantity(e.target.value)}
+                  placeholder="Enter quantity"
+                  min="1"
+                  required
+                />
+              </div>
+              
+              <div>
+                <label htmlFor="add-expiry-date" className="block text-gray-700 text-sm font-bold mb-2">Expiry Date:</label>
+                <input
+                  type="date"
+                  id="add-expiry-date"
+                  className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700"
+                  value={addExpiryDate}
+                  onChange={(e) => setAddExpiryDate(e.target.value)}
+                  min={moment ? moment().format('YYYY-MM-DD') : ''}
+                  required
+                />
+              </div>
+            </div>
+            
+            <div className="flex space-x-4 mt-6">
+              <button
+                onClick={handleAddInventory}
+                className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg flex-1"
+              >
+                Add Inventory
+              </button>
+              <button
+                onClick={() => {
+                  setShowAddInventoryModal(false);
+                  setSelectedProduct(null);
+                  setAddQuantity('');
+                  setAddExpiryDate(moment ? moment().format('YYYY-MM-DD') : '');
+                }}
+                className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg flex-1"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Product Modal */}
+      {showDeleteModal && selectedProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-semibold text-gray-800 mb-4">Delete Product - {selectedProduct.name}</h3>
+            
+            <div className="mb-4">
+              <p className="text-red-700 font-medium mb-2">Are you sure you want to completely remove the inventory?</p>
+              <p className="text-sm text-gray-600 mb-4">This action cannot be undone.</p>
+              
+              <div className="bg-red-50 p-3 rounded border border-red-200">
+                <p className="text-sm text-red-800 mb-2">To confirm, please type exactly "delete" in the field below:</p>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => {
+                    // Input sanitization - only allow letters and convert to lowercase
+                    const sanitized = e.target.value.toLowerCase().replace(/[^a-z]/g, '');
+                    setDeleteConfirmText(sanitized);
+                  }}
+                  placeholder="Type 'delete' to confirm"
+                  className="w-full px-3 py-2 border border-red-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                  maxLength={6}
+                />
+              </div>
+            </div>
+            
+            <div className="flex space-x-4">
+              <button
+                onClick={handleDeleteProduct}
+                disabled={deleteConfirmText.toLowerCase().trim() !== 'delete'}
+                className={`flex-1 font-bold py-3 px-4 rounded-lg ${
+                  deleteConfirmText.toLowerCase().trim() === 'delete'
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                Yes, Delete
+              </button>
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setSelectedProduct(null);
+                  setDeleteConfirmText('');
+                }}
+                className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg"
+              >
+                No, Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove Batch Modal */}
+      {showRemoveBatchModal && removeBatchProduct && removeBatchIndex !== null && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-xl font-semibold text-gray-800 mb-4">Remove Batch - {removeBatchProduct.name}</h3>
+            
+            <div className="mb-4">
+              <p className="text-orange-700 font-medium mb-2">No product of this date are on shelf?</p>
+              <p className="text-sm text-gray-600 mb-2">This will mark this batch as removed from inventory.</p>
+              
+              {removeBatchProduct.expiryDates && removeBatchProduct.expiryDates[removeBatchIndex] && (
+                <div className="bg-orange-50 p-3 rounded border border-orange-200">
+                  <p className="text-sm text-orange-800">
+                    <strong>Batch Details:</strong><br/>
+                    Expiry: {moment(removeBatchProduct.expiryDates[removeBatchIndex].date).format('DD/MM/YYYY')}<br/>
+                    Quantity: {removeBatchProduct.expiryDates[removeBatchIndex].quantity}
+                  </p>
+                </div>
+              )}
+            </div>
+            
+            <div className="space-y-3">
+              <div className="flex space-x-4">
+                <button
+                  onClick={confirmRemoveBatch}
+                  className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-bold py-3 px-4 rounded-lg"
+                >
+                  Yes, Remove
+                </button>
+                <button
+                  onClick={confirmRemoveAndAddNewBatch}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg"
+                >
+                  Yes, Remove & Add New
+                </button>
+              </div>
+              <button
+                onClick={() => {
+                  setShowRemoveBatchModal(false);
+                  setRemoveBatchProduct(null);
+                  setRemoveBatchIndex(null);
+                }}
+                className="w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg"
+              >
+                No, Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
