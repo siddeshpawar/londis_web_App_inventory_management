@@ -295,6 +295,13 @@ const ProductList = ({ db, userId, employeeId }) => {
   const [filterCategory, setFilterCategory] = useState('All');
   const [filterExpiryStatus, setFilterExpiryStatus] = useState('All');
   const [sortBy, setSortBy] = useState('name_asc');
+  
+  // Barcode scanner states
+  const [isSearchScanning, setIsSearchScanning] = useState(false);
+  const [searchAvailableCameras, setSearchAvailableCameras] = useState([]);
+  const [searchSelectedDeviceId, setSearchSelectedDeviceId] = useState('');
+  const searchQrCodeReaderRef = useRef(null);
+  const searchHtml5QrcodeScannerInstanceRef = useRef(null);
 
   const categories = useMemo(() => ['All', 'Chocolates', 'Alcohol', 'Wines', 'Cigarettes', 'Soft Drinks', 'Crisps', 'Other'], []);
 
@@ -428,6 +435,65 @@ const ProductList = ({ db, userId, employeeId }) => {
     setSortBy('name_asc');
   };
 
+  // --- Search Barcode Scanner Logic ---
+  const stopSearchScanner = useCallback(() => {
+    if (searchHtml5QrcodeScannerInstanceRef.current) {
+      searchHtml5QrcodeScannerInstanceRef.current.stop().catch(error => {
+        console.error("Failed to stop search scanner on manual stop:", error);
+      });
+      searchHtml5QrcodeScannerInstanceRef.current = null;
+    }
+    setIsSearchScanning(false);
+  }, []);
+
+  useEffect(() => {
+    if (isSearchScanning && searchSelectedDeviceId) {
+      if (!searchHtml5QrcodeScannerInstanceRef.current) {
+        const scanner = new Html5Qrcode("search-qr-code-reader");
+        searchHtml5QrcodeScannerInstanceRef.current = scanner;
+      }
+      
+      const onScanSuccess = (decodedText, decodedResult) => {
+        setSearchTerm(decodedText);
+        stopSearchScanner();
+      };
+      
+      searchHtml5QrcodeScannerInstanceRef.current.start(
+        searchSelectedDeviceId, 
+        { fps: 10, qrbox: { width: 250, height: 250 } }, 
+        onScanSuccess, 
+        (errorMessage) => { /* handle error */ }
+      ).catch(err => {
+        setError('Failed to start search scanner. Check permissions.');
+        stopSearchScanner();
+      });
+    }
+
+    return () => {
+      if (searchHtml5QrcodeScannerInstanceRef.current) {
+        searchHtml5QrcodeScannerInstanceRef.current.stop().catch(error => {
+          console.error("Failed to stop search html5QrcodeScanner on cleanup:", error);
+        });
+      }
+    };
+  }, [isSearchScanning, searchSelectedDeviceId, stopSearchScanner]);
+
+  useEffect(() => {
+    if(Html5Qrcode) {
+      Html5Qrcode.getCameras().then(devices => {
+        if (devices && devices.length) {
+          setSearchAvailableCameras(devices);
+          if(!searchSelectedDeviceId) {
+            const backCamera = devices.find(d => d.label.toLowerCase().includes('back'));
+            setSearchSelectedDeviceId(backCamera ? backCamera.id : devices[0].id);
+          }
+        }
+      }).catch(err => {
+        console.error("Error getting search cameras", err);
+      });
+    }
+  }, [searchSelectedDeviceId]);
+
   const getExpiryItemStyleClass = (expiryDate, isRemoved) => {
     if (isRemoved) return 'bg-gray-200 border-l-gray-400 text-gray-500 line-through';
     const today = moment();
@@ -449,7 +515,19 @@ const ProductList = ({ db, userId, employeeId }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 items-end">
         <div>
             <label htmlFor="search-term" className="block text-sm font-medium text-gray-700">Search Name/Barcode</label>
-            <input type="text" id="search-term" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2"/>
+            <div className="flex gap-2">
+                <input type="text" id="search-term" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="mt-1 block flex-1 rounded-md border-gray-300 shadow-sm p-2"/>
+                <button 
+                    onClick={() => setIsSearchScanning(!isSearchScanning)} 
+                    className="mt-1 bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-md flex items-center justify-center"
+                    title="Scan Barcode"
+                >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                </button>
+            </div>
         </div>
         <div>
             <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700">Category</label>
@@ -479,6 +557,23 @@ const ProductList = ({ db, userId, employeeId }) => {
             <button onClick={handleClearFilters} className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg">Clear Filters</button>
         </div>
       </div>
+      
+      {/* Search Barcode Scanner */}
+      {isSearchScanning && (
+        <div className="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold text-blue-800">Scan Barcode to Search</h3>
+            <button 
+              onClick={stopSearchScanner}
+              className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg"
+            >
+              Stop Scanner
+            </button>
+          </div>
+          <div id="search-qr-code-reader" ref={searchQrCodeReaderRef} style={{width: '100%', maxWidth: '500px', margin: 'auto'}}></div>
+          <p className="text-center text-sm text-gray-600 mt-4">Point camera at barcode to search for product</p>
+        </div>
+      )}
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredProducts.length > 0 ? filteredProducts.map(product => {
