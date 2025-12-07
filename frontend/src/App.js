@@ -18,6 +18,9 @@ import {
   query,
   onSnapshot,
   updateDoc,
+  where,
+  getDocs,
+  deleteDoc,
 } from 'firebase/firestore';
 
 import Tesseract from 'tesseract.js';
@@ -173,6 +176,9 @@ const AddProductForm = ({
   isScanning,
   setIsScanning,
   stopScanner,
+  qrCodeReaderRef,
+  showAddProductForm,
+  setShowAddProductForm,
 }) => {
   const handleOcrOptionClick = (option) => {
     setProductName(prev => `${prev} ${option}`.trim());
@@ -202,7 +208,26 @@ const AddProductForm = ({
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-lg mb-8">
-      <h3 className="text-2xl font-semibold text-gray-800 mb-4">{isExistingProduct ? 'Update Product Stock' : 'Add New Product'}</h3>
+      {!showAddProductForm ? (
+        <div className="text-center">
+          <button 
+            onClick={() => setShowAddProductForm(true)}
+            className="bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-8 rounded-lg text-lg w-full max-w-md"
+          >
+            Add New Product
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-2xl font-semibold text-gray-800">{isExistingProduct ? 'Update Product Stock' : 'Add New Product'}</h3>
+            <button 
+              onClick={() => setShowAddProductForm(false)}
+              className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg"
+            >
+              Back
+            </button>
+          </div>
       
       {imageUploadError && <MessageBox message={imageUploadError} type="error" />}
 
@@ -315,6 +340,156 @@ const AddProductForm = ({
           <div id="qr-code-reader" ref={qrCodeReaderRef} style={{width: '100%', maxWidth: '500px', margin: 'auto'}}></div>
           <p className="text-center text-sm text-gray-600 mt-4">Point camera at barcode to scan</p>
         </div>
+      )}
+        </>
+      )}
+    </div>
+  );
+};
+
+const RemoveInventory = ({ 
+  showRemoveInventory, 
+  setShowRemoveInventory, 
+  removeSearchTerm, 
+  setRemoveSearchTerm, 
+  isRemoveScanning, 
+  setIsRemoveScanning, 
+  foundProduct, 
+  setFoundProduct, 
+  showRemoveConfirm, 
+  setShowRemoveConfirm, 
+  handleSearchProduct, 
+  handleRemoveInventory, 
+  stopRemoveScanner, 
+  removeQrCodeReaderRef 
+}) => {
+  return (
+    <div className="bg-white p-6 rounded-lg shadow-lg mb-8">
+      {!showRemoveInventory ? (
+        <div className="text-center">
+          <button 
+            onClick={() => setShowRemoveInventory(true)}
+            className="bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-8 rounded-lg text-lg w-full max-w-md"
+          >
+            Completely Remove the Inventory
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-2xl font-semibold text-gray-800">Remove Inventory</h3>
+            <button 
+              onClick={() => {
+                setShowRemoveInventory(false);
+                setFoundProduct(null);
+                setRemoveSearchTerm('');
+                setShowRemoveConfirm(false);
+              }}
+              className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg"
+            >
+              Back
+            </button>
+          </div>
+
+          {!foundProduct ? (
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="remove-search" className="block text-gray-700 text-sm font-bold mb-2">Search by Product Name or Barcode:</label>
+                <div className="flex items-center space-x-2">
+                  <input 
+                    type="text" 
+                    id="remove-search" 
+                    className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700" 
+                    value={removeSearchTerm} 
+                    onChange={(e) => setRemoveSearchTerm(e.target.value)} 
+                    placeholder="Enter product name or barcode..."
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => setIsRemoveScanning(!isRemoveScanning)} 
+                    className="bg-blue-500 hover:bg-blue-600 text-white p-3 rounded-lg flex items-center justify-center"
+                    title="Scan Barcode"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              
+              <button 
+                onClick={handleSearchProduct}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg w-full"
+              >
+                Search Product
+              </button>
+
+              {/* Remove Barcode Scanner */}
+              {isRemoveScanning && (
+                <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold text-blue-800">Scan Barcode</h3>
+                    <button 
+                      onClick={stopRemoveScanner}
+                      className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg"
+                      type="button"
+                    >
+                      Stop Scanner
+                    </button>
+                  </div>
+                  <div id="remove-qr-code-reader" ref={removeQrCodeReaderRef} style={{width: '100%', maxWidth: '500px', margin: 'auto'}}></div>
+                  <p className="text-center text-sm text-gray-600 mt-4">Point camera at barcode to search</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            !showRemoveConfirm ? (
+              <div className="space-y-4">
+                <div className="bg-gray-50 p-4 rounded-lg border">
+                  <h4 className="font-semibold text-lg mb-2">Product Found:</h4>
+                  <p><strong>Name:</strong> {foundProduct.name}</p>
+                  <p><strong>Barcode:</strong> {foundProduct.barcode}</p>
+                  <p><strong>Category:</strong> {foundProduct.category}</p>
+                  <p><strong>Quantity:</strong> {foundProduct.quantity}</p>
+                  {foundProduct.imageUrl && (
+                    <img src={foundProduct.imageUrl} alt={foundProduct.name} className="mt-2 h-20 w-20 object-cover rounded-md border" />
+                  )}
+                </div>
+                
+                <button 
+                  onClick={() => setShowRemoveConfirm(true)}
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg w-full"
+                >
+                  Remove Inventory
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-red-50 p-4 rounded-lg border border-red-200">
+                  <h4 className="font-semibold text-lg mb-2 text-red-800">Confirm Removal</h4>
+                  <p className="text-red-700">Are you sure you want to completely remove "{foundProduct.name}" from the inventory?</p>
+                  <p className="text-sm text-red-600 mt-2">This action cannot be undone.</p>
+                </div>
+                
+                <div className="flex space-x-4">
+                  <button 
+                    onClick={handleRemoveInventory}
+                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg flex-1"
+                  >
+                    Yes, Remove
+                  </button>
+                  <button 
+                    onClick={() => setShowRemoveConfirm(false)}
+                    className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg flex-1"
+                  >
+                    No, Cancel
+                  </button>
+                </div>
+              </div>
+            )
+          )}
+        </>
       )}
     </div>
   );
@@ -851,6 +1026,18 @@ const DashboardPage = ({ setCurrentPage }) => {
   const [quantity, setQuantity] = useState('');
   const [expiryDate, setExpiryDate] = useState(moment ? moment().format('YYYY-MM-DD') : '');
   const [isExistingProduct, setIsExistingProduct] = useState(false);
+  const [showAddProductForm, setShowAddProductForm] = useState(false);
+  
+  // States for Remove Inventory
+  const [showRemoveInventory, setShowRemoveInventory] = useState(false);
+  const [removeSearchTerm, setRemoveSearchTerm] = useState('');
+  const [isRemoveScanning, setIsRemoveScanning] = useState(false);
+  const [foundProduct, setFoundProduct] = useState(null);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [removeAvailableCameras, setRemoveAvailableCameras] = useState([]);
+  const [removeSelectedDeviceId, setRemoveSelectedDeviceId] = useState('');
+  const removeQrCodeReaderRef = useRef(null);
+  const removeHtml5QrcodeScannerInstanceRef = useRef(null);
   
   // New states for image upload
   const [productImageData, setProductImageData] = useState(null);
@@ -981,6 +1168,66 @@ const DashboardPage = ({ setCurrentPage }) => {
       }
   }, []);
 
+  // --- Remove Inventory Functions ---
+  const stopRemoveScanner = useCallback(() => {
+    if (removeHtml5QrcodeScannerInstanceRef.current) {
+      removeHtml5QrcodeScannerInstanceRef.current.stop().catch(error => {
+        console.error("Failed to stop remove scanner on manual stop:", error);
+      });
+      removeHtml5QrcodeScannerInstanceRef.current = null;
+    }
+    setIsRemoveScanning(false);
+  }, []);
+
+  // --- Remove Scanner useEffect ---
+  useEffect(() => {
+    if (isRemoveScanning && removeSelectedDeviceId) {
+      if (!removeHtml5QrcodeScannerInstanceRef.current) {
+        const scanner = new Html5Qrcode("remove-qr-code-reader");
+        removeHtml5QrcodeScannerInstanceRef.current = scanner;
+      }
+      
+      const onScanSuccess = (decodedText, decodedResult) => {
+        setRemoveSearchTerm(decodedText);
+        stopRemoveScanner();
+      };
+      
+      removeHtml5QrcodeScannerInstanceRef.current.start(
+        removeSelectedDeviceId, 
+        { fps: 10, qrbox: { width: 250, height: 250 } }, 
+        onScanSuccess, 
+        (errorMessage) => { /* handle error */ }
+      ).catch(err => {
+        setMessage({ type: 'error', text: 'Failed to start remove scanner. Check permissions.' });
+        stopRemoveScanner();
+      });
+    }
+
+    return () => {
+      if (removeHtml5QrcodeScannerInstanceRef.current) {
+        removeHtml5QrcodeScannerInstanceRef.current.stop().catch(error => {
+          console.error("Failed to stop remove html5QrcodeScanner on cleanup:", error);
+        });
+      }
+    };
+  }, [isRemoveScanning, removeSelectedDeviceId, stopRemoveScanner]);
+
+  useEffect(() => {
+    if(Html5Qrcode) {
+      Html5Qrcode.getCameras().then(devices => {
+        if (devices && devices.length) {
+          setRemoveAvailableCameras(devices);
+          if(!removeSelectedDeviceId) {
+            const backCamera = devices.find(d => d.label.toLowerCase().includes('back'));
+            setRemoveSelectedDeviceId(backCamera ? backCamera.id : devices[0].id);
+          }
+        }
+      }).catch(err => {
+        console.error("Error getting remove cameras", err);
+      });
+    }
+  }, []);
+
   const handleAddInventoryItem = async (e) => {
     e.preventDefault();
     setMessage({ type: '', text: '' });
@@ -1007,6 +1254,18 @@ const DashboardPage = ({ setCurrentPage }) => {
                 imageUrl: itemImageUrl || existingData.imageUrl,
             });
             setMessage({ type: 'success', text: `Stock added to "${existingData.name}".` });
+            setTimeout(() => {
+                setScannedBarcode(''); 
+                setProductName(''); 
+                setCategory(categories[0]); 
+                setQuantity(''); 
+                setExpiryDate(getTodayDate()); 
+                setProductImageData(null); 
+                setImagePreviewUrl(null); 
+                setOcrOptions([]);
+                setShowAddProductForm(false);
+                setMessage({ type: '', text: '' });
+            }, 2000);
         } else {
             const newProductData = {
                 barcode: scannedBarcode,
@@ -1018,9 +1277,21 @@ const DashboardPage = ({ setCurrentPage }) => {
                 imageUrl: itemImageUrl,
             };
             await setDoc(productDocRef, newProductData);
-            setMessage({ type: 'success', text: `New product "${productName}" added.` });
+            setMessage({ type: 'success', text: `"${productName}" added to inventory` });
+            // Reset form and hide it after successful addition
+            setTimeout(() => {
+                setScannedBarcode(''); 
+                setProductName(''); 
+                setCategory(categories[0]); 
+                setQuantity(''); 
+                setExpiryDate(getTodayDate()); 
+                setProductImageData(null); 
+                setImagePreviewUrl(null); 
+                setOcrOptions([]);
+                setShowAddProductForm(false);
+                setMessage({ type: '', text: '' });
+            }, 2000);
         }
-        setScannedBarcode(''); setProductName(''); setCategory(categories[0]); setQuantity(''); setExpiryDate(getTodayDate()); setProductImageData(null); setImagePreviewUrl(null); setOcrOptions([]);
     } catch (error) {
         setMessage({ type: 'error', text: 'Failed to save product.' });
     }
@@ -1029,6 +1300,63 @@ const DashboardPage = ({ setCurrentPage }) => {
   const handleLogout = async () => {
     await signOut(auth);
     setCurrentPage('login');
+  };
+
+  const handleSearchProduct = async () => {
+    if (!removeSearchTerm.trim()) {
+      setMessage({ type: 'error', text: 'Please enter a product name or barcode' });
+      return;
+    }
+
+    try {
+      const productsCollectionRef = collection(db, 'products');
+      let q;
+      
+      // Check if the search term is a barcode (numeric) or product name
+      if (/^\d+$/.test(removeSearchTerm.trim())) {
+        // Search by barcode
+        q = query(productsCollectionRef, where('barcode', '==', removeSearchTerm.trim()));
+      } else {
+        // Search by product name (case insensitive)
+        q = query(productsCollectionRef, where('name', '>=', removeSearchTerm.trim()), where('name', '<=', removeSearchTerm.trim() + '\uf8ff'));
+      }
+
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        setMessage({ type: 'error', text: 'Product not found' });
+        setFoundProduct(null);
+      } else {
+        const product = querySnapshot.docs[0].data();
+        product.id = querySnapshot.docs[0].id;
+        setFoundProduct(product);
+        setMessage({ type: '', text: '' });
+      }
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Error searching for product' });
+      console.error('Search error:', error);
+    }
+  };
+
+  const handleRemoveInventory = async () => {
+    if (!foundProduct) return;
+
+    try {
+      await deleteDoc(doc(db, 'products', foundProduct.id));
+      setMessage({ type: 'success', text: `"${foundProduct.name}" removed from inventory` });
+      
+      // Reset and go back to main page after 2 seconds
+      setTimeout(() => {
+        setFoundProduct(null);
+        setRemoveSearchTerm('');
+        setShowRemoveInventory(false);
+        setShowRemoveConfirm(false);
+        setMessage({ type: '', text: '' });
+      }, 2000);
+    } catch (error) {
+      setMessage({ type: 'error', text: 'Failed to remove inventory' });
+      console.error('Remove error:', error);
+    }
   };
   
   const handleOcrFileChange = async (event) => {
@@ -1103,6 +1431,26 @@ const DashboardPage = ({ setCurrentPage }) => {
             isScanning={isScanning}
             setIsScanning={setIsScanning}
             stopScanner={stopScanner}
+            qrCodeReaderRef={qrCodeReaderRef}
+            showAddProductForm={showAddProductForm}
+            setShowAddProductForm={setShowAddProductForm}
+        />
+
+        <RemoveInventory
+            showRemoveInventory={showRemoveInventory}
+            setShowRemoveInventory={setShowRemoveInventory}
+            removeSearchTerm={removeSearchTerm}
+            setRemoveSearchTerm={setRemoveSearchTerm}
+            isRemoveScanning={isRemoveScanning}
+            setIsRemoveScanning={setIsRemoveScanning}
+            foundProduct={foundProduct}
+            setFoundProduct={setFoundProduct}
+            showRemoveConfirm={showRemoveConfirm}
+            setShowRemoveConfirm={setShowRemoveConfirm}
+            handleSearchProduct={handleSearchProduct}
+            handleRemoveInventory={handleRemoveInventory}
+            stopRemoveScanner={stopRemoveScanner}
+            removeQrCodeReaderRef={removeQrCodeReaderRef}
         />
         
         <ProductList db={db} userId={userId} employeeId={employeeId} />
