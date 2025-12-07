@@ -170,6 +170,9 @@ const AddProductForm = ({
   ocrOptions,
   setOcrOptions,
   isExistingBarcode,
+  isScanning,
+  setIsScanning,
+  stopScanner,
 }) => {
   const handleOcrOptionClick = (option) => {
     setProductName(prev => `${prev} ${option}`.trim());
@@ -222,7 +225,20 @@ const AddProductForm = ({
       <form onSubmit={handleAddInventoryItem} className="space-y-4">
         <div>
           <label htmlFor="barcode" className="block text-gray-700 text-sm font-bold mb-2">Barcode:</label>
-          <input type="text" id="barcode" className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700" value={scannedBarcode} onChange={(e) => setScannedBarcode(e.target.value)} required />
+          <div className="flex items-center space-x-2">
+            <input type="text" id="barcode" className="shadow appearance-none border rounded-lg w-full py-3 px-4 text-gray-700" value={scannedBarcode} onChange={(e) => setScannedBarcode(e.target.value)} required />
+            <button 
+              type="button"
+              onClick={() => setIsScanning(!isScanning)} 
+              className="bg-blue-500 hover:bg-blue-600 text-white p-3 rounded-lg flex items-center justify-center"
+              title="Scan Barcode"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div>
@@ -282,6 +298,24 @@ const AddProductForm = ({
           {uploadingImage ? 'Uploading...' : (isExistingProduct ? 'Add New Stock' : 'Add Product')}
         </button>
       </form>
+      
+      {/* Barcode Scanner */}
+      {isScanning && (
+        <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold text-blue-800">Scan Barcode</h3>
+            <button 
+              onClick={stopScanner}
+              className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg"
+              type="button"
+            >
+              Stop Scanner
+            </button>
+          </div>
+          <div id="qr-code-reader" ref={qrCodeReaderRef} style={{width: '100%', maxWidth: '500px', margin: 'auto'}}></div>
+          <p className="text-center text-sm text-gray-600 mt-4">Point camera at barcode to scan</p>
+        </div>
+      )}
     </div>
   );
 };
@@ -1048,12 +1082,7 @@ const DashboardPage = ({ setCurrentPage }) => {
         {appMessage && <div className="bg-yellow-100 text-yellow-800 p-4 rounded-lg mb-4"><strong>Announcement:</strong> {appMessage}</div>}
         {isOwner && <MessageDisplay currentMessage={appMessage} db={db} />}
         
-        <div className="bg-white p-6 rounded-lg shadow-lg mb-8">
-            <h3 className="text-2xl font-semibold">Barcode Scanner</h3>
-            <button onClick={() => setIsScanning(!isScanning)} className="my-2 bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg">{isScanning ? 'Stop Scanner' : 'Start Scanner'}</button>
-            <div id="qr-code-reader" ref={qrCodeReaderRef} style={{width: '100%', maxWidth: '500px', margin: 'auto'}}></div>
-        </div>
-
+        
         <AddProductForm
             scannedBarcode={scannedBarcode} setScannedBarcode={setScannedBarcode}
             productName={productName} setProductName={setProductName}
@@ -1071,6 +1100,9 @@ const DashboardPage = ({ setCurrentPage }) => {
             onScanNameClick={() => ocrInputRef.current.click()}
             ocrOptions={ocrOptions} setOcrOptions={setOcrOptions}
             isExistingBarcode={isExistingProduct}
+            isScanning={isScanning}
+            setIsScanning={setIsScanning}
+            stopScanner={stopScanner}
         />
         
         <ProductList db={db} userId={userId} employeeId={employeeId} />
